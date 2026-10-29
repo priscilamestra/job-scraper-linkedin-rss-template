@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {},
-      "id": "4862dea5-288a-4a89-9453-841abf63bb50",
+      "id": "8d3e078d-8a32-5151-a099-496da233178a",
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -14,9 +14,9 @@
     },
     {
       "parameters": {
-        "jsCode": "/*\n  Public template configuration.\n\n  Replace these placeholders after importing\n  the workflow into your n8n instance.\n*/\n\nreturn [{\n  json: {\n    spreadsheet_id:\n      'YOUR_GOOGLE_SHEET_ID',\n\n    cv_active_folder_id:\n      'YOUR_CV_ACTIVE_FOLDER_ID'\n  }\n}];"
+        "jsCode": "const cfg = {\n  spreadsheet_id: 'YOUR_GOOGLE_SHEET_ID',\n  cv_active_folder_id: 'YOUR_CV_ACTIVE_FOLDER_ID',\n  timezone: 'UTC',\n  // Keep the same twelve sheet names in every workflow.\n  monthly_sheets: [\"JANEIRO\", \"FEVEREIRO\", \"MARÇO\", \"ABRIL\", \"MAIO\", \"JUNHO\", \"JULHO\", \"AGOSTO\", \"SETEMBRO\", \"OUTUBRO\", \"NOVEMBRO\", \"DEZEMBRO\"],\n};\nif (cfg.spreadsheet_id.startsWith('YOUR_')) throw new Error('Configure spreadsheet_id in Config.');\nnew Intl.DateTimeFormat('en-US', {timeZone: cfg.timezone});\nif (cfg.cv_active_folder_id.startsWith('YOUR_')) throw new Error('Configure cv_active_folder_id in Config.');\nreturn [{json:cfg}];"
       },
-      "id": "8c55b7b8-5444-47cb-97e5-3eeacdc39038",
+      "id": "3f64b77d-744d-5b0a-9a8b-5568875ba892",
       "name": "Config",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -27,12 +27,12 @@
     },
     {
       "parameters": {
-        "url": "{{   'https://sheets.googleapis.com/v4/spreadsheets/' +   $('Config').first().json.spreadsheet_id +   '/values:batchGet?' +   [     'JANEIRO!A1:Y1000',     'FEVEREIRO!A1:Y1000',     'MARÇO!A1:Y1000',     'ABRIL!A1:Y1000',     'MAIO!A1:Y1000',     'JUNHO!A1:Y1000',     'JULHO!A1:Y1000',     'AGOSTO!A1:Y1000',     'SETEMBRO!A1:Y1000',     'OUTUBRO!A1:Y1000',     'NOVEMBRO!A1:Y1000',     'DEZEMBRO!A1:Y1000'   ]     .map(range => 'ranges=' + encodeURIComponent(range))     .join('&') }}",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Config').first().json.spreadsheet_id + '/values:batchGet?' + $('Config').first().json.monthly_sheets.map(s => 'ranges=' + encodeURIComponent(\"'\" + s.replaceAll(\"'\", \"''\") + \"'!A:Y\")).join('&') }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleSheetsOAuth2Api",
         "options": {}
       },
-      "id": "6d5af0c3-4298-4cba-98ca-44772faf3d14",
+      "id": "e4579fae-f9dd-5c88-af64-ace7a31a1ffa",
       "name": "Read All Monthly Sheets",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
@@ -40,18 +40,15 @@
         512,
         336
       ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "gC5t4ydGzpTmYqDa",
-          "name": "Google Sheets"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
     },
     {
       "parameters": {
-        "jsCode": "const response =\n  $json ?? {};\n\n\nconst valueRanges =\n  Array.isArray(\n    response.valueRanges\n  )\n    ? response.valueRanges\n    : [];\n\n\nconst jobs = [];\n\n\n// --------------------------------------------------\n// SCAN ALL MONTHLY SHEETS\n// --------------------------------------------------\n\nfor (\n  const range\n  of valueRanges\n) {\n  const rangeName =\n    String(\n      range.range ?? ''\n    );\n\n\n  /*\n    Extract the sheet name from ranges such as:\n\n    JANEIRO!A1:Y1000\n    'MARÇO'!A1:Y1000\n  */\n  const sheetMatch =\n    rangeName.match(\n      /^'?([^'!]+)'?!/\n    );\n\n\n  const targetSheet =\n    sheetMatch\n      ? sheetMatch[1]\n      : '';\n\n\n  const rows =\n    Array.isArray(\n      range.values\n    )\n      ? range.values\n      : [];\n\n\n  /*\n    Row 1 contains the spreadsheet header.\n\n    Start at index 1 so only job rows are processed.\n  */\n  for (\n    let i = 1;\n    i < rows.length;\n    i++\n  ) {\n    const row =\n      rows[i] ?? [];\n\n\n    const qualified =\n      String(\n        row[19] ?? ''\n      ).trim();\n\n\n    const coverLetter =\n      String(\n        row[20] ?? ''\n      ).trim();\n\n\n    const description =\n      String(\n        row[11] ?? ''\n      ).trim();\n\n\n    /*\n      A job is eligible for Workflow 03 only when:\n\n      1. Qualified = Yeap\n      2. Cover Letter is still empty\n      3. Description is available\n    */\n    const isQualified =\n      qualified\n        .toLowerCase() ===\n      'yeap';\n\n\n    const hasNoCoverLetter =\n      coverLetter === '';\n\n\n    const hasDescription =\n      description !== '';\n\n\n    if (!isQualified) {\n      continue;\n    }\n\n\n    if (!hasNoCoverLetter) {\n      continue;\n    }\n\n\n    if (!hasDescription) {\n      continue;\n    }\n\n\n    jobs.push({\n      json: {\n\n        /*\n          Internal routing metadata used later to\n          update the exact spreadsheet cell.\n        */\n        target_sheet:\n          targetSheet,\n\n        row_number:\n          i + 1,\n\n\n        // A - Job ID\n        job_id:\n          String(\n            row[0] ?? ''\n          ),\n\n        // B - Status\n        status:\n          String(\n            row[1] ?? ''\n          ),\n\n        // C - Date Scraped\n        date_scraped:\n          String(\n            row[2] ?? ''\n          ),\n\n        // D - Source\n        source:\n          String(\n            row[3] ?? ''\n          ),\n\n        // E - Search Keyword\n        search_keyword:\n          String(\n            row[4] ?? ''\n          ),\n\n        // F - Date Posted\n        date_posted:\n          String(\n            row[5] ?? ''\n          ),\n\n        // G - Title\n        title:\n          String(\n            row[6] ?? ''\n          ),\n\n        // H - Work Mode\n        work_mode:\n          String(\n            row[7] ?? ''\n          ),\n\n        // I - URL\n        url:\n          String(\n            row[8] ?? ''\n          ),\n\n        // J - Company Name\n        company_name:\n          String(\n            row[9] ?? ''\n          ),\n\n        // K - Location\n        location:\n          String(\n            row[10] ?? ''\n          ),\n\n        // L - Description\n        description,\n\n        // M - Language\n        language:\n          String(\n            row[12] ?? ''\n          ),\n\n        // N - Payment\n        payment:\n          String(\n            row[13] ?? ''\n          ),\n\n        // O - Time Type\n        time_type:\n          String(\n            row[14] ?? ''\n          ),\n\n        // P - Job Type\n        job_type:\n          String(\n            row[15] ?? ''\n          ),\n\n        // Q - Experience\n        experience:\n          String(\n            row[16] ?? ''\n          ),\n\n        // R - Salary\n        salary:\n          String(\n            row[17] ?? ''\n          ),\n\n        // S - Match\n        match:\n          String(\n            row[18] ?? ''\n          ),\n\n        // T - Qualified\n        qualified,\n\n        // U - Cover Letter\n        cover_letter:\n          coverLetter,\n\n        // V - Notes\n        notes:\n          String(\n            row[21] ?? ''\n          ),\n\n        // W - Interview At\n        interview_at:\n          String(\n            row[22] ?? ''\n          ),\n\n        // X - Invite Meet\n        invite_meet:\n          String(\n            row[23] ?? ''\n          ),\n\n        // Y - Attended\n        attended:\n          row[24] === true ||\n          String(\n            row[24] ?? ''\n          ).toLowerCase() ===\n            'true'\n      }\n    });\n  }\n}\n\n\nreturn jobs;"
+        "jsCode": "const response = $json ?? {};\n\nconst valueRanges = Array.isArray(response.valueRanges)\n  ? response.valueRanges\n  : [];\n\nconst jobs = [];\n\nfor (const range of valueRanges) {\n  const rangeName = String(range.range ?? '');\n\n  const sheetMatch = rangeName.match(/^'?([^'!]+)'?!/);\n\n  const targetSheet = sheetMatch\n    ? sheetMatch[1]\n    : '';\n\n  const rows = Array.isArray(range.values)\n    ? range.values\n    : [];\n\n  // Linha 1 = cabeçalho\n  for (let i = 1; i < rows.length; i++) {\n    const row = rows[i] ?? [];\n\n    const qualified = String(row[19] ?? '').trim();\n    const coverLetter = String(row[20] ?? '').trim();\n    const description = String(row[11] ?? '').trim();\n\n    const isQualified =\n      qualified.toLowerCase() === 'yeap';\n\n    const hasNoCoverLetter =\n      coverLetter === '';\n\n    const hasDescription =\n      description !== '';\n\n    if (!isQualified) {\n      continue;\n    }\n\n    if (!hasNoCoverLetter) {\n      continue;\n    }\n\n    if (!hasDescription) {\n      continue;\n    }\n\n    jobs.push({\n      json: {\n        target_sheet: targetSheet,\n        row_number: i + 1,\n\n        job_id: String(row[0] ?? ''),\n        status: String(row[1] ?? ''),\n        date_scraped: String(row[2] ?? ''),\n        source: String(row[3] ?? ''),\n        search_keyword: String(row[4] ?? ''),\n        date_posted: String(row[5] ?? ''),\n        title: String(row[6] ?? ''),\n        work_mode: String(row[7] ?? ''),\n        url: String(row[8] ?? ''),\n        company_name: String(row[9] ?? ''),\n        location: String(row[10] ?? ''),\n        description,\n        language: String(row[12] ?? ''),\n        payment: String(row[13] ?? ''),\n        time_type: String(row[14] ?? ''),\n        job_type: String(row[15] ?? ''),\n        experience: String(row[16] ?? ''),\n        salary: String(row[17] ?? ''),\n        match: String(row[18] ?? ''),\n        qualified,\n        cover_letter: coverLetter,\n        notes: String(row[21] ?? ''),\n        interview_at: String(row[22] ?? ''),\n        invite_meet: String(row[23] ?? ''),\n        attended:\n          row[24] === true ||\n          String(row[24] ?? '').toLowerCase() === 'true'\n      }\n    });\n  }\n}\n\nreturn jobs;"
       },
-      "id": "cf071974-2c4d-47c4-b2ea-cbd34a01bf33",
+      "id": "d56faf5f-5b65-5833-9458-3fec615cc1b9",
       "name": "Filter Qualified Jobs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -88,7 +85,7 @@
           ]
         }
       },
-      "id": "66eedf0d-aa0b-4eba-b4b1-d5b911b214bf",
+      "id": "4adf286d-4a59-5bc0-8f29-0adfaf628235",
       "name": "Find Active CV",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
@@ -98,12 +95,9 @@
       ],
       "executeOnce": true,
       "alwaysOutputData": true,
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "aaVjoen2JAostV2F",
-          "name": "Google Drive account"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -115,7 +109,7 @@
         },
         "options": {}
       },
-      "id": "e3271e02-5cea-4444-a21b-946c56358a8d",
+      "id": "be9059af-a6ef-5a38-96f6-1b6db4e6143b",
       "name": "Download Active CV",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
@@ -124,19 +118,16 @@
         336
       ],
       "executeOnce": true,
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "aaVjoen2JAostV2F",
-          "name": "Google Drive account"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
         "operation": "pdf",
         "options": {}
       },
-      "id": "ee914457-20fd-40dd-b86c-af6da56bc7fa",
+      "id": "3a50d4c5-f64d-5e42-a79f-3bc754bc5a4a",
       "name": "Extract CV Text",
       "type": "n8n-nodes-base.extractFromFile",
       "typeVersion": 1,
@@ -148,9 +139,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const cvSource = $json ?? {};\n\nconst cvText = String(\n  cvSource.text ??\n  cvSource.content ??\n  cvSource.data ??\n  cvSource.extractedText ??\n  ''\n)\n  .replace(/\\r/g, '')\n  .replace(/[ \\t]+/g, ' ')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nif (!cvText) {\n  throw new Error(\n    'CV text is empty. Check the Google Drive and Extract CV Text nodes.'\n  );\n}\n\n/*\n  Restore all jobs previously selected by\n  Filter Qualified Jobs and attach the CV text\n  to each item before entering the processing loop.\n*/\nreturn $('Filter Qualified Jobs').all().map(item => ({\n  json: {\n    ...item.json,\n    cv_text: cvText\n  }\n}));"
+        "jsCode": "const cvSource = $json ?? {};\nconst cvText = String(\n  cvSource.text ??\n  cvSource.content ??\n  cvSource.data ??\n  cvSource.extractedText ??\n  ''\n).replace(/\\r/g, '')\n .replace(/[ \\t]+/g, ' ')\n .replace(/\\n{3,}/g, '\\n\\n')\n .trim();\n\nif (!cvText) {\n  throw new Error('CV text is empty. Check the Google Drive and Extract CV Text nodes.');\n}\n\nreturn $('Filter Qualified Jobs').all().map(item => ({\n  json: {\n    ...item.json,\n    cv_text: cvText\n  }\n}));"
       },
-      "id": "e96d975e-fba6-4f6a-9ec4-dc2d573b5783",
+      "id": "66622a0c-2830-53f1-90f9-88cb88c99d93",
       "name": "Restore Qualified Jobs After CV",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -162,9 +153,9 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const job = $json ?? {};\n\nconst language =\n  String(job.language ?? '').trim();\n\nconst description =\n  String(job.description ?? '').trim();\n\nconst cvText =\n  String(job.cv_text ?? '').trim();\n\n\nlet languageInstruction = '';\n\n\nif (language === 'Portuguese') {\n  languageInstruction = `\nWrite in natural Brazilian Portuguese.\n\nThis message will mainly be sent directly to a recruiter on LinkedIn.\n\nThe tone must feel:\n- friendly\n- human\n- professional\n- conversational\n- confident without sounding arrogant\n\nDo NOT use formal openings such as:\n\"Prezado recrutador\"\n\"Prezados\"\n\"À equipe de recrutamento\"\n\nPrefer a natural opening such as:\n\"Oi! Vi a vaga de...\"\n\"Oi! Me interessei pela vaga de...\"\n\"Olá! Vi a oportunidade de...\"\n\nDo not sound like a traditional cover letter.\n`;\n\n} else if (language === 'English') {\n  languageInstruction = `\nWrite in natural professional English.\n\nThis message will mainly be sent directly to a recruiter on LinkedIn.\n\nThe tone must feel:\n- friendly\n- human\n- professional\n- conversational\n- confident without sounding exaggerated\n\nDo NOT use formal openings such as:\n\"Dear Hiring Manager\"\n\"Dear Recruiter\"\n\"To whom it may concern\"\n\nPrefer a natural opening such as:\n\"Hi! I came across the...\"\n\"Hi! I saw the...\"\n\"Hi! The ... role at ... caught my attention because...\"\n\nDo not sound like a traditional cover letter.\n`;\n\n} else {\n  languageInstruction = `\nUse the main language of the job description.\n\nWrite as a friendly and professional LinkedIn message,\nnot as a formal cover letter.\n`;\n}\n\n\nconst prompt = `\nYou are writing a short job application message.\n\nThe MAIN use case is a DIRECT MESSAGE TO A RECRUITER ON LINKEDIN.\n\nIt may also be reused in a job application field, so it must remain professional,\nbut it should sound like a real person starting a conversation.\n\nYou have TWO sources:\n\nSOURCE A — JOB DESCRIPTION\nUse this ONLY to understand:\n- what the company needs;\n- the main responsibilities;\n- the most important technologies;\n- what kind of candidate they are looking for.\n\nSOURCE B — CANDIDATE CV\nThis is the ONLY source allowed for claims about the candidate.\n\n\n==================================================\nCRITICAL FACTUAL RULES\n==================================================\n\nNEVER invent candidate experience.\n\nNEVER convert a requirement from the job description into candidate experience.\n\nNEVER assume that similar technologies mean equivalent experience.\n\nNEVER combine facts from different CV projects into a new fictional project.\n\nNEVER associate a technology with a project unless the CV explicitly associates them.\n\nNEVER invent:\n- technologies\n- frameworks\n- tools\n- responsibilities\n- achievements\n- employers\n- project details\n- years\n- dates\n- certifications\n- seniority\n\nDo NOT mention a date unless:\n1. the date is explicitly stated in the CV;\n2. it clearly belongs to the exact experience or project being mentioned;\n3. the date is actually useful to the message.\n\nBy default, OMIT dates.\n\nIf a job requirement is not supported by the CV:\nDO NOT mention it as candidate experience.\n\nIt is better to omit a requirement than create false alignment.\n\nWhen describing a specific project or job experience, use ONLY facts,\ntechnologies and results explicitly listed inside that same project or experience.\n\nDo NOT use technologies from CORE SKILLS to decorate a specific project.\n\nDo NOT combine:\n- a project from one CV section\nwith\n- technologies or responsibilities from another CV section.\n\nCORE SKILLS may only be mentioned as general skills,\nnever as evidence that a specific project used them.\n\nIf you mention a concrete project, every technology attributed to that project\nmust appear inside that project's own CV bullets.\n\n\n==================================================\nPROJECT MATCHING RULE\n==================================================\n\nFirst, silently identify the 2 to 4 most important requirements of the vacancy.\n\nThen search the CV for the experience or project that has the STRONGEST REAL overlap.\n\nPrefer concrete projects over generic statements when possible.\n\nExamples:\n\nIf the vacancy emphasizes:\nRAG + LangChain + embeddings\n→ prefer a CV project that explicitly contains those technologies.\n\nIf the vacancy emphasizes:\nPython + APIs + data processing\n→ prefer a CV project that explicitly contains Python and APIs.\n\nIf the vacancy emphasizes:\nAI agents + workflows\n→ prefer an experience or project that explicitly mentions agents or AI workflows.\n\nDo NOT force a project connection when the CV does not support it.\n\nUse at most 1 or 2 projects/experiences in the message.\n\n\n==================================================\nWRITING GOAL\n==================================================\n\nThe message should communicate:\n\n1. I saw this specific opportunity.\n2. Something about the role genuinely matches work I have already done.\n3. Here is one concrete example from my experience.\n4. I would be interested in talking about the opportunity.\n\nDo NOT write a generic biography.\n\nDo NOT summarize the entire CV.\n\nDo NOT list technologies just to create keyword density.\n\nMake the connection between the vacancy and the candidate obvious.\n\n\n==================================================\nTONE AND STYLE\n==================================================\n\n${languageInstruction}\n\nLength:\n60 to 110 words.\n\nUse short, natural paragraphs.\n\nNo bullet points.\n\nNo subject line.\n\nNo placeholders.\n\nNo corporate clichés.\n\nAvoid phrases equivalent to:\n\"I am thrilled\"\n\"I am the perfect fit\"\n\"I am excited to apply\"\n\"aligning perfectly\"\n\"my extensive experience\"\n\"I strongly believe\"\n\nDo not start by introducing the candidate's full name.\n\nThe recruiter can already see the candidate's name.\n\nStart with the opportunity.\n\nThe message should feel like something a professional would actually type\nin a LinkedIn conversation.\n\nA natural structure is:\n\nOpening:\n\"I saw the role and it caught my attention because...\"\n\nConnection:\n\"In one of my projects...\"\n\nConcrete evidence:\nMention only technologies/results explicitly supported by the CV.\n\nClosing:\nA simple, human invitation to continue the conversation.\n\nExamples of acceptable closing tone:\n\nPortuguese:\n\"Se fizer sentido, adoraria conversar melhor sobre a oportunidade.\"\n\"Se achar que meu perfil pode fazer sentido para o time, fico à disposição para conversar.\"\n\nEnglish:\n\"If my background looks relevant, I'd be happy to chat more about the role.\"\n\"I'd be glad to talk more if you think my experience could be useful for the team.\"\n\nDo not copy these mechanically. Keep the final message natural.\n\n\n==================================================\nJOB DESCRIPTION\nFOR RELEVANCE ONLY\n==================================================\n\nTitle:\n${job.title ?? ''}\n\nCompany:\n${job.company_name ?? ''}\n\nLocation:\n${job.location ?? ''}\n\nWork Mode:\n${job.work_mode ?? ''}\n\nJob Type:\n${job.job_type ?? ''}\n\nExperience:\n${job.experience ?? ''}\n\nDescription:\n${description}\n\n\n==================================================\nCANDIDATE CV\nSOLE SOURCE OF CANDIDATE FACTS\n==================================================\n\n${cvText}\n\n\n==================================================\nFINAL VALIDATION BEFORE ANSWERING\n==================================================\n\nBefore returning the message, silently verify every factual claim.\n\nFor each candidate claim ask:\n\n\"Can I point to a specific sentence in the CV that supports this?\"\n\nIf NO:\nremove the claim.\n\nIf a technology appears only in the job description:\nremove it.\n\nIf a project detail was created by combining information from different parts\nof the CV:\nremove it.\n\nIf a date is uncertain or unnecessary:\nremove it.\n\nReturn ONLY the final recruiter message.\n`.trim();\n\n\nreturn {\n  json: {\n    ...job,\n    cover_letter_prompt: prompt\n  }\n};"
+        "jsCode": "const job = $json;\n\nconst language = String(job.language ?? '').trim();\nconst description = String(job.description ?? '').trim();\nconst cvText = String(job.cv_text ?? '').trim();\n\nlet languageInstruction = '';\n\nif (language === 'Portuguese') {\n  languageInstruction = `\nWrite in natural Brazilian Portuguese.\n\nThis message will mainly be sent directly to a recruiter on LinkedIn.\n\nThe tone must feel:\n- friendly\n- human\n- professional\n- conversational\n- confident without sounding arrogant\n\nDo NOT use formal openings such as:\n\"Prezado recrutador\"\n\"Prezados\"\n\"À equipe de recrutamento\"\n\nPrefer a natural opening such as:\n\"Oi! Vi a vaga de...\"\n\"Oi! Me interessei pela vaga de...\"\n\"Olá! Vi a oportunidade de...\"\n\nDo not sound like a traditional cover letter.\n`;\n} else if (language === 'English') {\n  languageInstruction = `\nWrite in natural professional English.\n\nThis message will mainly be sent directly to a recruiter on LinkedIn.\n\nThe tone must feel:\n- friendly\n- human\n- professional\n- conversational\n- confident without sounding exaggerated\n\nDo NOT use formal openings such as:\n\"Dear Hiring Manager\"\n\"Dear Recruiter\"\n\"To whom it may concern\"\n\nPrefer a natural opening such as:\n\"Hi! I came across the...\"\n\"Hi! I saw the...\"\n\"Hi! The ... role at ... caught my attention because...\"\n\nDo not sound like a traditional cover letter.\n`;\n} else {\n  languageInstruction = `\nUse the main language of the job description.\n\nWrite as a friendly and professional LinkedIn message,\nnot as a formal cover letter.\n`;\n}\n\nconst prompt = `\nYou are writing a short job application message.\n\nThe MAIN use case is a DIRECT MESSAGE TO A RECRUITER ON LINKEDIN.\n\nIt may also be reused in a job application field, so it must remain professional,\nbut it should sound like a real person starting a conversation.\n\nYou have TWO sources:\n\nSOURCE A — JOB DESCRIPTION\nUse this ONLY to understand:\n- what the company needs;\n- the main responsibilities;\n- the most important technologies;\n- what kind of candidate they are looking for.\n\nSOURCE B — CANDIDATE CV\nThis is the ONLY source allowed for claims about the candidate.\n\n==================================================\nCRITICAL FACTUAL RULES\n==================================================\n\nNEVER invent candidate experience.\n\nNEVER convert a requirement from the job description into candidate experience.\n\nNEVER assume that similar technologies mean equivalent experience.\n\nNEVER combine facts from different CV projects into a new fictional project.\n\nNEVER associate a technology with a project unless the CV explicitly associates them.\n\nNEVER invent:\n- technologies\n- frameworks\n- tools\n- responsibilities\n- achievements\n- employers\n- project details\n- years\n- dates\n- certifications\n- seniority\n\nDo NOT mention a date unless:\n1. the date is explicitly stated in the CV;\n2. it clearly belongs to the exact experience or project being mentioned;\n3. the date is actually useful to the message.\n\nBy default, OMIT dates.\n\nIf a job requirement is not supported by the CV:\nDO NOT mention it as candidate experience.\n\nIt is better to omit a requirement than create false alignment.\n\nWhen describing a specific project or job experience, use ONLY facts,\ntechnologies and results explicitly listed inside that same project or experience.\n\nDo NOT use technologies from CORE SKILLS to decorate a specific project.\n\nDo NOT combine:\n- a project from one CV section\nwith\n- technologies or responsibilities from another CV section.\n\nCORE SKILLS may only be mentioned as general skills,\nnever as evidence that a specific project used them.\n\nIf you mention a concrete project, every technology attributed to that project\nmust appear inside that project's own CV bullets.\n\n==================================================\nPROJECT MATCHING RULE\n==================================================\n\nFirst, silently identify the 2 to 4 most important requirements of the vacancy.\n\nThen search the CV for the experience or project that has the STRONGEST REAL overlap.\n\nPrefer concrete projects over generic statements when possible.\n\nExamples:\n\nIf the vacancy emphasizes:\nRAG + LangChain + embeddings\n→ prefer a CV project that explicitly contains those technologies.\n\nIf the vacancy emphasizes:\nPython + APIs + data processing\n→ prefer a CV project that explicitly contains Python and APIs.\n\nIf the vacancy emphasizes:\nAI agents + workflows\n→ prefer an experience or project that explicitly mentions agents or AI workflows.\n\nDo NOT force a project connection when the CV does not support it.\n\nUse at most 1 or 2 projects/experiences in the message.\n\n==================================================\nWRITING GOAL\n==================================================\n\nThe message should communicate:\n\n1. I saw this specific opportunity.\n2. Something about the role genuinely matches work I have already done.\n3. Here is one concrete example from my experience.\n4. I would be interested in talking about the opportunity.\n\nDo NOT write a generic biography.\n\nDo NOT summarize the entire CV.\n\nDo NOT list technologies just to create keyword density.\n\nMake the connection between the vacancy and the candidate obvious.\n\n==================================================\nTONE AND STYLE\n==================================================\n\n${languageInstruction}\n\nLength:\n60 to 110 words.\n\nUse short, natural paragraphs.\n\nNo bullet points.\n\nNo subject line.\n\nNo placeholders.\n\nNo corporate clichés.\n\nAvoid phrases equivalent to:\n\"I am thrilled\"\n\"I am the perfect fit\"\n\"I am excited to apply\"\n\"aligning perfectly\"\n\"my extensive experience\"\n\"I strongly believe\"\n\nDo not start by introducing the candidate's full name.\n\nDo not write:\n\"Sou Your Name...\"\n\nThe recruiter can already see the candidate's name.\n\nStart with the opportunity.\n\nThe message should feel like something a professional would actually type\nin a LinkedIn conversation.\n\nA natural structure is:\n\nOpening:\n\"I saw the role and it caught my attention because...\"\n\nConnection:\n\"In one of my projects...\"\n\nConcrete evidence:\nMention only technologies/results explicitly supported by the CV.\n\nClosing:\nA simple, human invitation to continue the conversation.\n\nExamples of acceptable closing tone:\n\nPortuguese:\n\"Se fizer sentido, adoraria conversar melhor sobre a oportunidade.\"\n\"Se achar que meu perfil pode fazer sentido para o time, fico à disposição para conversar.\"\n\nEnglish:\n\"If my background looks relevant, I'd be happy to chat more about the role.\"\n\"I'd be glad to talk more if you think my experience could be useful for the team.\"\n\nDo not copy these mechanically. Keep the final message natural.\n\n==================================================\nJOB DESCRIPTION\nFOR RELEVANCE ONLY\n==================================================\n\nTitle:\n${job.title ?? ''}\n\nCompany:\n${job.company_name ?? ''}\n\nLocation:\n${job.location ?? ''}\n\nWork Mode:\n${job.work_mode ?? ''}\n\nJob Type:\n${job.job_type ?? ''}\n\nExperience:\n${job.experience ?? ''}\n\nDescription:\n${description}\n\n==================================================\nCANDIDATE CV\nSOLE SOURCE OF CANDIDATE FACTS\n==================================================\n\n${cvText}\n\n==================================================\nFINAL VALIDATION BEFORE ANSWERING\n==================================================\n\nBefore returning the message, silently verify every factual claim.\n\nFor each candidate claim ask:\n\n\"Can I point to a specific sentence in the CV that supports this?\"\n\nIf NO:\nremove the claim.\n\nIf a technology appears only in the job description:\nremove it.\n\nIf a project detail was created by combining information from different parts\nof the CV:\nremove it.\n\nIf a date is uncertain or unnecessary:\nremove it.\n\nReturn ONLY the final recruiter message.\n`.trim();\n\nreturn {\n  json: {\n    ...job,\n    cover_letter_prompt: prompt\n  }\n};"
       },
-      "id": "c0c847e5-7779-4a13-bb87-951f51e6c6c4",
+      "id": "dcff0d9c-59f3-54ea-93f5-def5a7b4e41d",
       "name": "Prepare Cover Letter Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -174,16 +165,17 @@
       ]
     },
     {
-      "parameters": {},
-      "id": "e662c4a4-7c27-4e7f-9f88-a3db467cfb01",
+      "parameters": {
+        "amount": 60
+      },
+      "id": "37e974d5-3208-5845-8354-a2ab16a99323",
       "name": "Groq Rate Gate",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
         2352,
         464
-      ],
-      "webhookId": "671365be-7d3c-4653-a60a-1dfbdb0d412e"
+      ]
     },
     {
       "parameters": {
@@ -192,12 +184,11 @@
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "groqApi",
         "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({\n  model: 'openai/gpt-oss-20b',\n  messages: [\n    {\n      role: 'user',\n      content: $json.cover_letter_prompt\n    }\n  ],\n  reasoning_effort: 'low',\n  include_reasoning: false,\n  temperature: 0.1,\n  max_completion_tokens: 1024,\n  stream: false\n}) }}",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'openai/gpt-oss-20b',\n  messages: [\n    {\n      role: 'user',\n      content: $json.cover_letter_prompt\n    }\n  ],\n  reasoning_effort: 'low',\n  include_reasoning: false,\n  temperature: 0.1,\n  max_completion_tokens: 1024,\n  stream: false\n}) }}",
         "options": {}
       },
-      "id": "14568631-d12b-4767-81bd-0a77dae8be07",
+      "id": "b05cb6cf-225e-58f4-8111-851c339f64f5",
       "name": "Groq - Generate Cover Letter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
@@ -208,31 +199,27 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000,
-      "credentials": {
-        "groqApi": {
-          "id": "OkSsedGBiEYRysZN",
-          "name": "Groq API"
-        }
-      }
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const job =\n  $('Prepare Cover Letter Prompt').item.json ?? {};\n\n\n/*\n  Read the final recruiter message returned by\n  the fact-check model.\n*/\nconst raw =\n  $json?.choices?.[0]?.message?.content ??\n  $json?.text ??\n  $json?.output ??\n  $json?.response ??\n  '';\n\n\nconst coverLetter =\n  String(raw)\n    .trim()\n    .replace(\n      /^```(?:text|markdown)?\\s*/i,\n      ''\n    )\n    .replace(\n      /\\s*```$/i,\n      ''\n    )\n    .trim();\n\n\nif (!coverLetter) {\n  throw new Error(\n    'Fact-check model returned an empty recruiter message.'\n  );\n}\n\n\n/*\n  Keep the job routing metadata required by the\n  Google Sheets update and attach the final message.\n*/\nconst result = {\n  ...job,\n\n  cover_letter:\n    coverLetter\n};\n\n\n/*\n  Remove temporary data that is no longer needed\n  after the final message has been generated.\n*/\ndelete result.cv_text;\ndelete result.cover_letter_prompt;\n\n\nreturn {\n  json: result\n};"
+        "jsCode": "const job = $('Prepare Cover Letter Prompt').item.json;\n\nconst raw =\n  $json?.choices?.[0]?.message?.content ??\n  $json?.text ??\n  $json?.output ??\n  $json?.response ??\n  '';\n\nconst coverLetter = String(raw ?? '')\n  .trim()\n  .replace(/^```(?:text|markdown)?\\s*/i, '')\n  .replace(/\\s*```$/i, '')\n  .trim();\n\nif (!coverLetter) {\n  throw new Error('Groq returned an empty cover letter.');\n}\n\nreturn {\n  json: {\n    ...job,\n    cover_letter: coverLetter\n  }\n};"
       },
-      "id": "dabaf7d6-40e6-4f82-869b-c82f2326f0f3",
+      "id": "7daaf8ec-0a5e-51b4-9011-53eb567328ca",
       "name": "Parse Cover Letter",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         3488,
         464
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "method": "PUT",
-        "url": "={{\n  'https://sheets.googleapis.com/v4/spreadsheets/' +\n  $('Config').first().json.spreadsheet_id +\n  '/values/' +\n  encodeURIComponent(\n    $json.target_sheet +\n    '!U' +\n    $json.row_number\n  )\n}}",
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $('Config').first().json.spreadsheet_id + '/values/' + encodeURIComponent(\"'\" + $json.target_sheet.replaceAll(\"'\", \"''\") + \"'!U\" + $json.row_number) }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendQuery": true,
@@ -245,12 +232,11 @@
           ]
         },
         "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({ values: [[$json.cover_letter]] }) }}",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: [[$json.cover_letter]] }) }}",
         "options": {}
       },
-      "id": "59131a70-7a4d-4f6a-9542-a7ba0180ee35",
+      "id": "cdf3d050-f717-5221-a6de-55d7ea68c7f5",
       "name": "Update Cover Letter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
@@ -258,27 +244,25 @@
         3712,
         464
       ],
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "gC5t4ydGzpTmYqDa",
-          "name": "Google Sheets"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "content": "# Setup After Import\n\n1. Open the `Config` node and replace:\n\n   - `YOUR_GOOGLE_SHEET_ID` with your Google Sheets job tracker ID.\n   - `YOUR_CV_ACTIVE_FOLDER_ID` with the Google Drive folder ID that contains your active PDF resume.\n\n2. Select your **Google Sheets OAuth2** credential in:\n\n   - `Read All Monthly Sheets`\n   - `Update Cover Letter`\n\n3. Select your **Google Drive OAuth2** credential in:\n\n   - `Find Active CV`\n   - `Download Active CV`\n\n4. Select your **Groq** credential in:\n\n   - `Groq - Generate Cover Letter`\n   - `Fact Check Cover Letter`\n\n5. Confirm your workflow timezone in **Workflow Settings**.\n\n6. Test the workflow first with `Manual Trigger` using one row where:\n\n   - `Qualified = Yeap`\n   - `Cover Letter` is empty\n   - `Description` is not empty\n\n7. After a successful manual test, enable the `Schedule Trigger` if desired.\n\n## Default Schedule\n\nThe default cron schedule runs at:\n\n- 08:00\n- 10:00\n- 12:00\n- 14:00\n- 16:00\n- 18:00\n- 20:00\n\nCron expression:\n\n```cron\n0 8,10,12,14,16,18,20 * * *",
-        "height": 1076,
+        "content": "### Setup\nConfigure Config, select your Google Drive, Google Sheets and Groq credentials, and test manually on a disposable row. Both Groq nodes require credentials. Schedules ship disabled. See README.md and Docs/SETUP.md.",
+        "height": 420,
         "width": 560,
         "color": 3
       },
-      "id": "6dbe4965-2d82-4ca8-a546-bfac4fb89eac",
+      "id": "a1a08893-b95b-5c7f-aff1-482d697500a5",
       "name": "SETUP - READ ME",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -16,
-        -960
+        32,
+        -304
       ]
     },
     {
@@ -287,7 +271,7 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "=0 8,10,12,14,16,18,20 * * *"
+              "expression": "0 8,10,12,14,16,18,20 * * *"
             }
           ]
         }
@@ -298,22 +282,24 @@
         32,
         432
       ],
-      "id": "96bb1779-0dc4-4311-8fc5-52043ac1f6f4",
-      "name": "Schedule Trigger"
+      "id": "134108ad-539d-5e18-b72d-e0181285375f",
+      "name": "Schedule Trigger",
+      "disabled": true
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const job =\n  $('Prepare Cover Letter Prompt').item.json ?? {};\n\n\nconst generatedMessage =\n  $json?.choices?.[0]?.message?.content ??\n  '';\n\n\nconst cvText =\n  String(\n    job.cv_text ?? ''\n  ).trim();\n\n\nconst language =\n  String(\n    job.language ?? ''\n  ).trim();\n\n\nif (!generatedMessage.trim()) {\n  throw new Error(\n    'Generated recruiter message is empty.'\n  );\n}\n\n\nlet languageRule = '';\n\n\nif (language === 'Portuguese') {\n  languageRule = `\nKeep the final message in natural Brazilian Portuguese.\n\nKeep it friendly, professional and appropriate for a LinkedIn recruiter DM.\n`;\n\n} else if (language === 'English') {\n  languageRule = `\nKeep the final message in natural professional English.\n\nKeep it friendly, professional and appropriate for a LinkedIn recruiter DM.\n`;\n\n} else {\n  languageRule = `\nKeep the same language as the original message.\n`;\n}\n\n\nconst factCheckPrompt = `\nYou are a strict factual editor.\n\nYour ONLY task is to remove unsupported claims from a recruiter message.\n\nThe CANDIDATE CV below is the ONLY source of truth.\n\n\n==================================================\nSTRICT RULES\n==================================================\n\nReview every factual statement about the candidate.\n\nA claim may remain ONLY if it is explicitly supported by the CV.\n\nWhen a specific project or experience is mentioned:\n\n- use ONLY technologies, actions and results written inside that same project's or experience's own CV content;\n- do NOT attach general skills to a specific project unless the CV explicitly does so;\n- do NOT combine information from different projects or experiences;\n- do NOT infer architecture, scale, purpose, implementation details or results.\n\nDo NOT invent anything.\n\nDo NOT add new candidate facts.\n\nDo NOT add new technologies.\n\nDo NOT add new achievements.\n\nDo NOT add new explanations.\n\nDo NOT improve the message by introducing factual details that were not already present.\n\nYour editing strategy must be CONSERVATIVE:\n\n1. Keep supported wording.\n2. Delete unsupported words, phrases or sentences.\n3. Make only minimal grammatical changes when deletion requires it.\n\nIf uncertain whether a claim is supported:\nDELETE IT.\n\n\n==================================================\nFACTUAL CONSISTENCY\n==================================================\n\nIf a technology is mentioned in the message but the CV does not explicitly\nassociate it with the project or experience being discussed:\nremove that technology from that sentence.\n\nIf a result, responsibility or implementation detail is broader than what\nthe CV explicitly states:\nremove or narrow the unsupported part.\n\nIf the message combines facts from different CV sections into a single\nproject or experience:\nremove the unsupported combination.\n\nIf a claim is supported only as a general skill but not by the specific\nproject being discussed:\ndo not present it as part of that project.\n\nDo NOT replace an unsupported fact with another invented or assumed fact.\n\n\n==================================================\nCV REFERENCES\n==================================================\n\nDo NOT mention the CV itself in the final message.\n\nNever write phrases such as:\n\n\"according to my CV\"\n\"listed in my CV\"\n\"as stated in my CV\"\n\"que consta no meu CV\"\n\"que coloquei no meu CV\"\n\n\n==================================================\nSTYLE\n==================================================\n\n${languageRule}\n\nKeep approximately the same length or shorter.\n\nDo not turn it into a formal cover letter.\n\nDo not add bullet points.\n\nDo not add a subject line.\n\nDo not add placeholders.\n\nKeep the original conversational tone whenever possible.\n\nReturn ONLY the corrected recruiter message.\n\n\n==================================================\nCANDIDATE CV\nSOURCE OF TRUTH\n==================================================\n\n${cvText}\n\n\n==================================================\nMESSAGE TO REVIEW\n==================================================\n\n${generatedMessage}\n`.trim();\n\n\nreturn {\n  json: {\n    ...job,\n\n    generated_message:\n      generatedMessage,\n\n    fact_check_prompt:\n      factCheckPrompt\n  }\n};"
+        "jsCode": "const job = $('Prepare Cover Letter Prompt').item.json;\n\nconst generatedMessage =\n  $json?.choices?.[0]?.message?.content ??\n  '';\n\nconst cvText = String(job.cv_text ?? '').trim();\nconst language = String(job.language ?? '').trim();\n\nif (!generatedMessage.trim()) {\n  throw new Error('Generated recruiter message is empty.');\n}\n\nlet languageRule = '';\n\nif (language === 'Portuguese') {\n  languageRule = `\nKeep the final message in natural Brazilian Portuguese.\nKeep it friendly, professional and appropriate for a LinkedIn recruiter DM.\n`;\n} else if (language === 'English') {\n  languageRule = `\nKeep the final message in natural professional English.\nKeep it friendly, professional and appropriate for a LinkedIn recruiter DM.\n`;\n} else {\n  languageRule = `\nKeep the same language as the original message.\n`;\n}\n\nconst factCheckPrompt = `\nYou are a strict factual editor.\n\nYour ONLY task is to remove unsupported claims from a recruiter message.\n\nThe CANDIDATE CV below is the ONLY source of truth.\n\n==================================================\nSTRICT RULES\n==================================================\n\nReview every factual statement about the candidate.\n\nA claim may remain ONLY if it is explicitly supported by the CV.\n\nWhen a specific project is mentioned:\n- use ONLY technologies, actions and results written inside that project's own CV bullets;\n- do NOT attach CORE SKILLS to that project;\n- do NOT combine information from different projects;\n- do NOT infer architecture, scale, purpose or implementation details.\n\nDo NOT invent anything.\n\nDo NOT add new candidate facts.\n\nDo NOT add new technologies.\n\nDo NOT add new achievements.\n\nDo NOT add new explanations.\n\nDo NOT improve the message by introducing factual details that were not already present.\n\nYour editing strategy must be CONSERVATIVE:\n\n1. Keep supported wording.\n2. Delete unsupported words, phrases or sentences.\n3. Make only minimal grammatical changes when deletion requires it.\n\nIf uncertain whether a claim is supported:\nDELETE IT.\n\nExamples:\n\nIf the message says a project was \"fully Python-based\"\nbut that project's CV bullets do not say Python:\nremove that claim.\n\nIf the message says \"several APIs\"\nbut the project only explicitly mentions Google Workspace APIs:\nremove \"several APIs\" rather than generalizing.\n\nIf the message says a workflow \"collects video data\"\nbut the CV only says it processes links, transcripts, metrics and comments:\nuse the explicit CV wording or remove the claim.\n\nDo NOT mention the CV itself in the final message.\n\nNever write phrases such as:\n\"according to my CV\"\n\"listed in my CV\"\n\"as stated in my CV\"\n\"que consta no meu CV\"\n\"que coloquei no meu CV\"\n\n==================================================\nSTYLE\n==================================================\n\n${languageRule}\n\nKeep approximately the same length or shorter.\n\nDo not turn it into a formal cover letter.\n\nDo not add bullet points.\n\nReturn ONLY the corrected recruiter message.\n\n==================================================\nCANDIDATE CV\nSOURCE OF TRUTH\n==================================================\n\n${cvText}\n\n==================================================\nMESSAGE TO REVIEW\n==================================================\n\n${generatedMessage}\n`.trim();\n\nreturn {\n  json: {\n    ...job,\n    generated_message: generatedMessage,\n    fact_check_prompt: factCheckPrompt\n  }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2816,
+        2832,
         464
       ],
-      "id": "34001799-63f2-4129-8e2f-a0f277b4e2be",
-      "name": "Prepare Fact Check Prompt"
+      "id": "ee77276b-e813-522e-888d-4ac7fd60ab94",
+      "name": "Prepare Fact Check Prompt",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -322,9 +308,8 @@
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "groqApi",
         "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ JSON.stringify({\n  model: 'openai/gpt-oss-120b',\n  messages: [\n    {\n      role: 'user',\n      content: $json.fact_check_prompt\n    }\n  ],\n  reasoning_effort: 'medium',\n  include_reasoning: false,\n  temperature: 0,\n  max_completion_tokens: 1024,\n  stream: false\n}) }}",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'openai/gpt-oss-120b',\n  messages: [\n    {\n      role: 'user',\n      content: $json.fact_check_prompt\n    }\n  ],\n  reasoning_effort: 'medium',\n  include_reasoning: false,\n  temperature: 0,\n  max_completion_tokens: 1024,\n  stream: false\n}) }}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -333,14 +318,12 @@
         3264,
         464
       ],
-      "id": "00acf6a1-5e23-4454-b98f-0da06be8216b",
+      "id": "c755d65f-5676-5192-aa53-9941b9581792",
       "name": "Fact Check Cover Letter",
-      "credentials": {
-        "groqApi": {
-          "id": "OkSsedGBiEYRysZN",
-          "name": "Groq API"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -352,23 +335,23 @@
         1920,
         336
       ],
-      "id": "1e348934-3a73-49b7-b321-efff0b90de0e",
+      "id": "7dba879d-3696-5bfa-a7ad-f3bf1d84918a",
       "name": "Loop Over Items"
     },
     {
-      "parameters": {},
+      "parameters": {
+        "amount": 60
+      },
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
         3040,
         464
       ],
-      "id": "5dc7d80f-2c75-43ff-9ae2-524d031032f8",
-      "name": "Fact Check Rate Gate",
-      "webhookId": "aa10b307-f163-410c-b74c-8396d8c8dcc8"
+      "id": "3edf3ec0-2c41-5773-95de-4b121ee2151f",
+      "name": "Fact Check Rate Gate"
     }
   ],
-  "pinData": {},
   "connections": {
     "Manual Trigger": {
       "main": [
@@ -488,6 +471,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -496,6 +486,13 @@
         [
           {
             "node": "Update Cover Letter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
           }
@@ -521,6 +518,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -529,6 +533,13 @@
         [
           {
             "node": "Parse Cover Letter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
             "type": "main",
             "index": 0
           }
@@ -555,6 +566,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -570,25 +588,11 @@
       ]
     }
   },
-  "active": false,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
-    "availableInMCP": false
+    "timezone": "UTC"
   },
-  "versionId": "d6ce93ff-6859-4481-a608-45d2e10b783f",
-  "meta": {
-    "templateCredsSetupCompleted": true,
-    "instanceId": "759b65fe6e3f9dc383eb92635fd5e595db474b16d593150f1dbb4d4ac5411965"
-  },
-  "nodeGroups": [],
-  "id": "dNEzSJTtaUCmVhaC",
-  "tags": [
-    {
-      "updatedAt": "2026-09-17T14:10:11.874Z",
-      "createdAt": "2026-09-17T14:10:11.874Z",
-      "id": "kDnxvjMsDq9SJpEM",
-      "name": "Github"
-    }
-  ]
+  "active": false,
+  "pinData": {}
 }

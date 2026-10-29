@@ -30,3 +30,8 @@ Desktop.ini
 *.tmp
 *.log
 ~$*
+.local-backup/
+
+outputs/
+
+node_modules/

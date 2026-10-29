@@ -1,0 +1,459 @@
+{
+  "name": "TEMPLATE - 04 LinkedIn Job Alerts Gmail",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a76fa70c-73cc-5d6d-9ffb-258429d8d8bf",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\"allowed_sender\": \"jobalerts-noreply@linkedin.com\", \"source_label\": \"YOUR_SOURCE_LABEL\", \"processed_label\": \"YOUR_PROCESSED_LABEL\", \"review_label\": \"YOUR_REVIEW_LABEL\", \"max_messages_per_run\": 3, \"keyword_overrides\": [], \"timezone\": \"UTC\"}",
+        "options": {}
+      },
+      "id": "2f16c308-591c-5f3a-becc-b0dd81e6ed43",
+      "name": "Alert Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "returnAll": true
+      },
+      "id": "e8261fab-0de7-58f8-b560-cabc084f1071",
+      "name": "Gmail - List Labels",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        304
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Alert Configuration').first().json || {};\nconst labels = $input.all().map(item => item.json || {});\n\nfunction findLabelId(name) {\n  const match = labels.find(label =>\n    String(label.name || '').trim() === String(name || '').trim()\n  );\n  return match ? String(match.id || '') : '';\n}\n\nfunction gmailLabelToken(name) {\n  return String(name || '')\n    .trim()\n    .replace(/\\s+/g, '-');\n}\n\nconst sourceLabelId = findLabelId(cfg.source_label);\nconst processedLabelId = findLabelId(cfg.processed_label);\nconst reviewLabelId = findLabelId(cfg.review_label);\n\nconst missing = [];\nif (!sourceLabelId) missing.push(cfg.source_label);\nif (!processedLabelId) missing.push(cfg.processed_label);\nif (!reviewLabelId) missing.push(cfg.review_label);\n\nif (missing.length) {\n  throw new Error(\n    'Crie estas labels no Gmail antes do teste: ' +\n    missing.join(', ')\n  );\n}\n\n/*\n  A busca inicial usa somente remetente e labels.\n  A validação de assunto, corpo e autenticação acontece\n  depois. Assim, uma mudança no template do LinkedIn\n  vai para Review em vez de desaparecer silenciosamente.\n*/\nconst gmailQuery = [\n  'from:' + cfg.allowed_sender,\n  'label:' + gmailLabelToken(cfg.source_label),\n  '-label:' + gmailLabelToken(cfg.processed_label),\n  '-label:' + gmailLabelToken(cfg.review_label)\n].join(' ');\n\nreturn [{\n  json: {\n    ...cfg,\n    source_label_id: sourceLabelId,\n    processed_label_id: processedLabelId,\n    review_label_id: reviewLabelId,\n    gmail_query: gmailQuery\n  }\n}];"
+      },
+      "id": "1dd0831e-dd9a-5999-bfe4-1c1210d77489",
+      "name": "Resolve Alert Labels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": "={{ $('Alert Configuration').first().json.max_messages_per_run }}",
+        "filters": {
+          "includeSpamTrash": false,
+          "labelIds": [
+            "={{ $json.source_label_id }}"
+          ],
+          "q": "={{ $json.gmail_query }}",
+          "readStatus": "both"
+        }
+      },
+      "id": "4bee7864-222a-59d4-9010-d346b8703730",
+      "name": "Gmail - Find Unprocessed Alerts",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        304
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "function collectRuns(name, maxRuns) {\n  const collected = [];\n\n  for (let runIndex = 0; runIndex < maxRuns; runIndex++) {\n    try {\n      const items = $(name).all(0, runIndex);\n\n      if (Array.isArray(items)) {\n        collected.push(...items);\n      }\n    } catch {\n      // O node pode não ter executado nesta iteração.\n    }\n  }\n\n  return collected;\n}\n\nlet foundItems = [];\n\ntry {\n  foundItems =\n    $('Gmail - Find Unprocessed Alerts').all();\n} catch {\n  foundItems = [];\n}\n\nconst maxRuns = foundItems.length;\n\nconst processedItems =\n  collectRuns('Gmail - Mark Processed', maxRuns);\n\nconst reviewItems =\n  collectRuns('Gmail - Mark for Review', maxRuns);\n\nconst extractedItems =\n  collectRuns('Extract LinkedIn Alert Jobs', maxRuns);\n\nconst processedIds = new Set(\n  processedItems\n    .map(item => String(item.json?.id || ''))\n    .filter(Boolean)\n);\n\nconst reviewIds = new Set(\n  reviewItems\n    .map(item =>\n      String(\n        item.json?.id ||\n        item.json?.email_id ||\n        ''\n      )\n    )\n    .filter(Boolean)\n);\n\nconst jobsExtracted =\n  extractedItems.reduce(\n    (total, item) =>\n      total + Number(item.json?.job_count || 0),\n    0\n  );\n\nreturn [{\n  json: {\n    status: 'completed',\n    source: 'LinkedIn Alert',\n    emails_found:\n      foundItems.length,\n    emails_processed:\n      processedIds.size,\n    emails_for_review:\n      reviewIds.size,\n    jobs_extracted:\n      jobsExtracted,\n    message:\n      'LinkedIn Job Alerts Gmail check completed.'\n  }\n}];"
+      },
+      "id": "6869efc1-7641-5d34-bd3f-c095bb466ebf",
+      "name": "Run Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {}
+      },
+      "id": "5870b623-dd4a-5f86-8d4e-6801efd068c3",
+      "name": "Gmail - Get LinkedIn Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        512
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json || {};\nconst cfg = $('Resolve Alert Labels').first().json || {};\nconst headers = email.headers || {};\n\nfunction decodeEntities(value) {\n  return String(value || '')\n    .replace(/&amp;/gi, '&')\n    .replace(/&quot;/gi, '\"')\n    .replace(/&#39;|&apos;/gi, \"'\")\n    .replace(/&lt;/gi, '<')\n    .replace(/&gt;/gi, '>')\n    .replace(/&nbsp;/gi, ' ')\n    .replace(/&middot;|&#183;|&#xB7;/gi, '·')\n    .replace(/&#(\\d+);/g, (_, number) => String.fromCharCode(Number(number)))\n    .replace(/&#x([0-9a-f]+);/gi, (_, number) => String.fromCharCode(parseInt(number, 16)));\n}\n\nfunction htmlToText(value) {\n  return decodeEntities(value)\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/(?:p|div|li|tr|h[1-6])>/gi, '\\n')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\r/g, '')\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/ *\\n */g, '\\n')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n}\n\nfunction cleanLine(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction normalizeSender(value) {\n  const text = String(value || '').trim().toLowerCase();\n  const bracket = text.match(/<([^>]+)>/);\n  return (bracket ? bracket[1] : text).trim();\n}\n\nfunction decodedCandidates(rawUrl) {\n  const values = [];\n  let current = decodeEntities(rawUrl);\n  for (let index = 0; index < 4; index++) {\n    if (!current || values.includes(current)) break;\n    values.push(current);\n    try {\n      const decoded = decodeURIComponent(current);\n      if (decoded === current) break;\n      current = decoded;\n    } catch {\n      break;\n    }\n  }\n  const nested = [];\n  for (const value of values) {\n    try {\n      const parsed = new URL(value);\n      for (const key of ['url', 'redirect', 'redirectUrl', 'dest', 'destination', 'target', 'continue']) {\n        const candidate = parsed.searchParams.get(key);\n        if (candidate) nested.push(...decodedCandidates(candidate));\n      }\n    } catch {}\n  }\n  return [...new Set([...values, ...nested])];\n}\n\nfunction jobIdFromUrl(rawUrl) {\n  for (const candidate of decodedCandidates(rawUrl)) {\n    const pathMatch =\n      candidate.match(/\\/(?:comm\\/)?jobs\\/view\\/(?:[^/?#]*-)?(\\d{7,12})(?:[/?#]|$)/i) ||\n      candidate.match(/\\/(?:comm\\/)?jobs\\/view\\/(\\d{7,12})/i);\n    if (pathMatch) return pathMatch[1];\n\n    try {\n      const parsed = new URL(candidate);\n      for (const key of ['currentJobId', 'jobId', 'job_id']) {\n        const value = parsed.searchParams.get(key);\n        if (/^\\d{7,12}$/.test(String(value || ''))) return String(value);\n      }\n    } catch {}\n\n    const queryMatch = candidate.match(/(?:currentJobId|jobId|job_id)(?:=|%3D|:)(\\d{7,12})/i);\n    if (queryMatch) return queryMatch[1];\n  }\n  return '';\n}\n\nfunction formatBrazilDateTime(value) {\n  const date = value instanceof Date ? value : new Date(value);\n  if (Number.isNaN(date.getTime())) return '';\n  const parts = new Intl.DateTimeFormat('en-US', {\n    timeZone: cfg.timezone || 'UTC',\n    day: '2-digit',\n    month: '2-digit',\n    year: 'numeric',\n    hour: '2-digit',\n    minute: '2-digit',\n    hour12: false\n  }).formatToParts(date).reduce((result, part) => {\n    result[part.type] = part.value;\n    return result;\n  }, {});\n  return parts.day + '/' + parts.month + '/' + parts.year + ' ' + parts.hour + ':' + parts.minute;\n}\n\nfunction detectWorkMode(value) {\n  const text = String(value || '').toLowerCase();\n  if (/\\b(remote|remoto|remota)\\b/i.test(text)) return 'Remote';\n  if (/\\b(hybrid|híbrido|hibrido|híbrida|hibrida)\\b/i.test(text)) return 'Hybrid';\n  if (/\\b(on-site|onsite|on site|presencial)\\b/i.test(text)) return 'On-site';\n  return '';\n}\n\nconst subject = cleanLine(email.subject || headers.subject || '');\nconst sender =\n  email.from?.value?.[0]?.address ||\n  email.from?.text ||\n  headers.from ||\n  '';\nconst normalizedSender = normalizeSender(sender);\nconst html = String(email.html || email.textAsHtml || '');\nconst plainText = String(email.text || htmlToText(html));\nconst bodyKeywordMatch = plainText.match(/Your job alert for\\s+(.+?)\\s+\\d+\\s+new jobs?\\b/i);\nconst subjectKeywordMatch = subject.match(/^[“\"](.+?)[”\"]\\s*:/);\nconst detectedKeyword = cleanLine(\n  subjectKeywordMatch?.[1] ||\n  bodyKeywordMatch?.[1] ||\n  ''\n);\nconst override = Array.isArray(cfg.keyword_overrides)\n  ? cfg.keyword_overrides.find(rule =>\n      cleanLine(rule.alert_identifier).toLowerCase() === detectedKeyword.toLowerCase()\n    )\n  : null;\nconst searchKeyword = cleanLine(override?.search_keyword || detectedKeyword);\n\nfunction parseSubjectPostedDate(value) {\n  const match = String(value || '').match(\n    /posted on\\s+(\\d{1,2})\\/(\\d{1,2})\\/(\\d{2,4})\\b/i\n  );\n\n  if (!match) {\n    return {\n      date_posted: '',\n      posted_at: ''\n    };\n  }\n\n  const month = Number(match[1]);\n  const day = Number(match[2]);\n  let year = Number(match[3]);\n\n  if (year < 100) {\n    year += 2000;\n  }\n\n  const iso =\n    String(year).padStart(4, '0') + '-' +\n    String(month).padStart(2, '0') + '-' +\n    String(day).padStart(2, '0');\n\n  const parsed = new Date(iso + 'T12:00:00Z');\n\n  if (\n    Number.isNaN(parsed.getTime()) ||\n    parsed.getUTCFullYear() !== year ||\n    parsed.getUTCMonth() + 1 !== month ||\n    parsed.getUTCDate() !== day\n  ) {\n    return {\n      date_posted: '',\n      posted_at: ''\n    };\n  }\n\n  return {\n    date_posted:\n      String(day).padStart(2, '0') + '/' +\n      String(month).padStart(2, '0') + '/' +\n      String(year).padStart(4, '0'),\n    posted_at: iso\n  };\n}\n\nconst subjectPosted =\n  parseSubjectPostedDate(subject);\n\nconst authenticationHeader = String(\n  headers['authentication-results'] ||\n  headers['arc-authentication-results'] ||\n  ''\n);\nconst authenticationOk =\n  !authenticationHeader ||\n  (\n    /dkim=pass/i.test(authenticationHeader) &&\n    /(?:header\\.(?:d|i)=|@)(?:[\\w.-]+\\.)?linkedin\\.com/i.test(authenticationHeader)\n  );\n\nconst senderOk = normalizedSender === String(cfg.allowed_sender || '').toLowerCase();\nconst subjectOk =\n  Boolean(searchKeyword) &&\n  /posted on\\s+\\d{1,2}\\/\\d{1,2}\\/\\d{2,4}\\b/i.test(subject);\nconst bodyOk =\n  /Your job alert for\\b/i.test(plainText) &&\n  /\\bnew jobs?\\b/i.test(plainText);\n\nconst anchors = [];\nconst anchorPattern = /<a\\b[^>]*href\\s*=\\s*([\"'])(.*?)\\1[^>]*>([\\s\\S]*?)<\\/a>/gi;\nlet anchorMatch;\nwhile ((anchorMatch = anchorPattern.exec(html)) !== null) {\n  anchors.push({\n    start: anchorMatch.index,\n    end: anchorPattern.lastIndex,\n    href: decodeEntities(anchorMatch[2]),\n    text: cleanLine(htmlToText(anchorMatch[3]))\n  });\n}\n\nconst candidates = [];\nlet unparsedJobLinks = 0;\nfor (const anchor of anchors) {\n  const looksLikeJobView =\n    /jobs(?:\\/|%2f)view(?:\\/|%2f)/i.test(anchor.href) ||\n    /(?:currentJobId|jobId|job_id)(?:=|%3D|:)/i.test(anchor.href);\n  if (!looksLikeJobView) continue;\n\n  const jobId = jobIdFromUrl(anchor.href);\n  if (!jobId) {\n    unparsedJobLinks++;\n    continue;\n  }\n\n  const nearbyHtml = html.slice(anchor.end, Math.min(anchor.end + 1800, html.length));\n  const nearbyLines = htmlToText(nearbyHtml)\n    .split('\\n')\n    .map(cleanLine)\n    .filter(Boolean)\n    .filter(line =>\n      !/^(Actively recruiting|Easy Apply|\\d+\\s+(?:school alumni|connections?)|View job|View jobs)$/i.test(line)\n    );\n\n  let title = anchor.text;\n  if (\n    !title ||\n    /^(LinkedIn|View job|View jobs|Apply|See more)$/i.test(title)\n  ) {\n    title = 'Not specified';\n  }\n\n  let companyName = '';\n  let location = '';\n  let workMode = '';\n\n  const detailLine = nearbyLines.find(line => /[·•]/.test(line));\n  if (detailLine) {\n    const detailMatch = detailLine.match(/^(.+?)\\s*[·•]\\s*(.+)$/);\n    if (detailMatch) {\n      companyName = cleanLine(detailMatch[1]);\n      const locationWithMode = cleanLine(detailMatch[2]);\n      workMode = detectWorkMode(locationWithMode);\n      location = cleanLine(\n        locationWithMode.replace(/\\s*\\((?:Remote|Remoto|Remota|Hybrid|Híbrido|Hibrido|Híbrida|Hibrida|On-site|On site|Presencial)\\)\\s*$/i, '')\n      );\n    }\n  }\n\n  candidates.push({\n    job_id: jobId,\n    status: 'To do',\n    date_scraped: formatBrazilDateTime(new Date()),\n    source: 'LinkedIn Alert',\n    search_keyword: searchKeyword,\n    date_posted: subjectPosted.date_posted,\n    title,\n    work_mode: workMode,\n    url: 'https://www.linkedin.com/jobs/view/' + jobId,\n    company_name: companyName,\n    location,\n    description: '',\n    language: '',\n    payment: '',\n    time_type: '',\n    job_type: '',\n    experience: '',\n    salary: '',\n    match: '',\n    qualified: '',\n    cover_letter: '',\n    notes: '',\n    interview_at: '',\n    invite_meet: '',\n    attended: false,\n    posted_at: subjectPosted.posted_at,\n    scraped_at: new Date().toISOString()\n  });\n}\n\nfunction completeness(job) {\n  return ['title', 'company_name', 'location', 'work_mode']\n    .reduce((score, field) => score + (String(job[field] || '').trim() ? 1 : 0), 0);\n}\n\nconst jobsById = new Map();\nfor (const job of candidates) {\n  const current = jobsById.get(job.job_id);\n  if (!current || completeness(job) > completeness(current)) {\n    jobsById.set(job.job_id, job);\n  }\n}\nconst jobs = [...jobsById.values()];\n\nconst problems = [];\nif (!senderOk) problems.push('unexpected_sender');\nif (!subjectOk) problems.push('unexpected_subject');\nif (!bodyOk) problems.push('missing_job_alert_markers');\nif (!authenticationOk) problems.push('linkedin_authentication_failed');\nif (!jobs.length) problems.push('no_linkedin_job_ids');\nif (unparsedJobLinks) problems.push('unparsed_job_links:' + unparsedJobLinks);\n\nreturn [{\n  json: {\n    email_id: String(email.id || email.messageId || ''),\n    thread_id: String(email.threadId || ''),\n    subject,\n    sender: normalizedSender,\n    search_keyword: searchKeyword,\n    jobs,\n    job_count: jobs.length,\n    unparsed_job_link_count: unparsedJobLinks,\n    ready_for_job_saver: problems.length === 0,\n    review_reasons: problems\n  }\n}];"
+      },
+      "id": "d3179902-1894-5b9c-a41e-065018194e09",
+      "name": "Extract LinkedIn Alert Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ready_for_job_saver }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "85e1ccb6-e298-503b-abc6-0ce2b91647c9",
+      "name": "Alert Ready for Job Saver?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json || {};\nconst jobs = Array.isArray(email.jobs) ? email.jobs : [];\nreturn jobs.map(job => ({\n  json: {\n    ...job,\n    _gmail_message_id: email.email_id,\n    _gmail_subject: email.subject\n  },\n  pairedItem: {\n    item: 0\n  }\n}));"
+      },
+      "id": "e7b6592a-41c4-5215-abed-075405aebd5b",
+      "name": "Split Jobs for Job Saver",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_JOB_SAVER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "b54c8300-14f7-5f7c-9b3e-79e7f39b5a45",
+      "name": "Send to Job Saver",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2400,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail - Get LinkedIn Alert').item.json.id }}",
+        "labelIds": [
+          "={{ $('Resolve Alert Labels').first().json.processed_label_id }}"
+        ]
+      },
+      "id": "bc80fb2d-b340-59c1-b4a8-e6e5631db2fd",
+      "name": "Gmail - Mark Processed",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "cc98528a-1237-51a7-9e0a-1420da1c2b8d",
+      "name": "Loop Gmail Alerts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1200,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.email_id }}",
+        "labelIds": [
+          "={{ $('Resolve Alert Labels').first().json.review_label_id }}"
+        ]
+      },
+      "id": "98f6313d-f1eb-529b-9d0d-d04ce2dc1c29",
+      "name": "Gmail - Mark for Review",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2160,
+        656
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 15
+            }
+          ]
+        }
+      },
+      "id": "aed2c5d1-e461-5cec-bea3-191f6d58f149",
+      "name": "Schedule - Every Hour at :15",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        400
+      ],
+      "disabled": true
+    }
+  ],
+  "connections": {
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Alert Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Configuration": {
+      "main": [
+        [
+          {
+            "node": "Gmail - List Labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - List Labels": {
+      "main": [
+        [
+          {
+            "node": "Resolve Alert Labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Alert Labels": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Find Unprocessed Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Find Unprocessed Alerts": {
+      "main": [
+        [
+          {
+            "node": "Loop Gmail Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Get LinkedIn Alert": {
+      "main": [
+        [
+          {
+            "node": "Extract LinkedIn Alert Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract LinkedIn Alert Jobs": {
+      "main": [
+        [
+          {
+            "node": "Alert Ready for Job Saver?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Ready for Job Saver?": {
+      "main": [
+        [
+          {
+            "node": "Split Jobs for Job Saver",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Mark for Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Jobs for Job Saver": {
+      "main": [
+        [
+          {
+            "node": "Send to Job Saver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Job Saver": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Mark Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Mark Processed": {
+      "main": [
+        [
+          {
+            "node": "Loop Gmail Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Gmail Alerts": {
+      "main": [
+        [
+          {
+            "node": "Run Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail - Get LinkedIn Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Mark for Review": {
+      "main": [
+        [
+          {
+            "node": "Loop Gmail Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule - Every Hour at :15": {
+      "main": [
+        [
+          {
+            "node": "Alert Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "UTC"
+  },
+  "active": false,
+  "pinData": {}
+}

@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {},
-      "id": "d65afc34-fc9b-4007-a6cc-63969a2703f2",
+      "id": "433307cb-d01b-53f3-80d4-f2f9487f800c",
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -14,9 +14,26 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $json ?? {};\nconst body = input.body ?? {};\n\nconst defaults = {\n  // The LinkedIn search URL behind each RSS feed already represents\n  // the actual search criteria. We do not filter jobs again by keyword in n8n.\n  keywords: [],\n\n  // Maximum job age used by downstream normalization logic.\n  max_age_hours: 24,\n\n  // FetchRSS Free currently supports up to 5 feeds.\n  // Replace only the placeholders you want to use.\n  // Unconfigured placeholder feeds are automatically ignored.\n  rss_feeds: [\n    {\n      url: 'YOUR_FETCHRSS_FEED_URL_1',\n      source: 'FetchRSS',\n      search_keyword: 'YOUR_SEARCH_KEYWORD_1',\n      location: '',\n      work_mode: ''\n    },\n    {\n      url: 'YOUR_FETCHRSS_FEED_URL_2',\n      source: 'FetchRSS',\n      search_keyword: 'YOUR_SEARCH_KEYWORD_2',\n      location: '',\n      work_mode: ''\n    },\n    {\n      url: 'YOUR_FETCHRSS_FEED_URL_3',\n      source: 'FetchRSS',\n      search_keyword: 'YOUR_SEARCH_KEYWORD_3',\n      location: '',\n      work_mode: ''\n    },\n    {\n      url: 'YOUR_FETCHRSS_FEED_URL_4',\n      source: 'FetchRSS',\n      search_keyword: 'YOUR_SEARCH_KEYWORD_4',\n      location: '',\n      work_mode: ''\n    },\n    {\n      url: 'YOUR_FETCHRSS_FEED_URL_5',\n      source: 'FetchRSS',\n      search_keyword: 'YOUR_SEARCH_KEYWORD_5',\n      location: '',\n      work_mode: ''\n    }\n  ]\n};\n\n\nfunction normalizeKeywords(value) {\n  if (Array.isArray(value)) {\n    return value\n      .map(String)\n      .map(v => v.trim())\n      .filter(Boolean);\n  }\n\n  if (typeof value === 'string') {\n    return value\n      .split(',')\n      .map(v => v.trim())\n      .filter(Boolean);\n  }\n\n  return [];\n}\n\n\nfunction normalizeFeeds(value) {\n  if (!Array.isArray(value)) {\n    return [];\n  }\n\n  return value\n    .map(feed => ({\n      url: String(feed?.url ?? '').trim(),\n      source: String(feed?.source ?? 'FetchRSS').trim() || 'FetchRSS',\n      search_keyword: String(feed?.search_keyword ?? '').trim(),\n      location: String(feed?.location ?? '').trim(),\n      work_mode: String(feed?.work_mode ?? '').trim()\n    }))\n    .filter(feed => {\n      if (!feed.url) {\n        return false;\n      }\n\n      // Ignore public-template placeholders that were not configured yet.\n      return !feed.url.startsWith('YOUR_FETCHRSS_FEED_URL_');\n    });\n}\n\n\nconst requestedKeywords =\n  normalizeKeywords(body.keywords).length\n    ? normalizeKeywords(body.keywords)\n    : normalizeKeywords(defaults.keywords);\n\n\nconst requestedMaxAge =\n  Number(\n    body.max_age_hours ??\n    defaults.max_age_hours\n  );\n\n\nconst requestedFeeds =\n  normalizeFeeds(body.rss_feeds).length\n    ? normalizeFeeds(body.rss_feeds)\n    : normalizeFeeds(defaults.rss_feeds);\n\n\nif (!requestedFeeds.length) {\n  throw new Error(\n    'No RSS feeds are configured. Replace at least one YOUR_FETCHRSS_FEED_URL_X placeholder with a valid FetchRSS feed URL.'\n  );\n}\n\n\nreturn [{\n  json: {\n    keywords: requestedKeywords,\n\n    max_age_hours:\n      Number.isFinite(requestedMaxAge) &&\n      requestedMaxAge > 0\n        ? requestedMaxAge\n        : 24,\n\n    rss_feeds: requestedFeeds\n  }\n}];"
+        "httpMethod": "POST",
+        "path": "linkedin-job-search",
+        "responseMode": "lastNode",
+        "options": {}
       },
-      "id": "d5bee0ad-ae2c-4f0b-bc5c-ec1a90d9ead7",
+      "id": "cd1efb73-d8d3-5948-ab0c-0271b0010dee",
+      "name": "MCP / Codex Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        2864,
+        1680
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $json ?? {};\nconst body = input.body ?? {};\n\nconst defaults = {\n  // A própria URL do LinkedIn já representa a busca.\n  // Não filtramos novamente por keyword dentro do n8n.\n  keywords: [],\n\n  max_age_hours: 24,\n  timezone: 'UTC',\n\n  rss_feeds: [\n    {\n      url: 'YOUR_FETCHRSS_FEED_URL_1',\n\n      source: 'FetchRSS',\n\n      search_keyword: 'YOUR_SEARCH_KEYWORD_1',\n\n      location: '',\n\n      work_mode: ''\n    }\n  ]\n};\n\n\nfunction normalizeKeywords(value) {\n  if (Array.isArray(value)) {\n    return value\n      .map(String)\n      .map(v => v.trim())\n      .filter(Boolean);\n  }\n\n  if (typeof value === 'string') {\n    return value\n      .split(',')\n      .map(v => v.trim())\n      .filter(Boolean);\n  }\n\n  return [];\n}\n\n\nconst requestedKeywords =\n  normalizeKeywords(body.keywords).length\n    ? normalizeKeywords(body.keywords)\n    : normalizeKeywords(defaults.keywords);\n\n\nconst requestedMaxAge =\n  Number(\n    body.max_age_hours ??\n    defaults.max_age_hours\n  );\n\n\nreturn [{\n  json: {\n    keywords: requestedKeywords,\n\n    max_age_hours:\n      Number.isFinite(requestedMaxAge) &&\n      requestedMaxAge > 0\n        ? requestedMaxAge\n        : 24,\n\n    timezone: defaults.timezone,\n    rss_feeds:\n      defaults.rss_feeds\n  }\n}];"
+      },
+      "id": "048a65a7-af54-5f69-8ed2-e6748a816be5",
       "name": "Resolve Search Plan",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -27,9 +44,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const cfg = $input.first().json ?? {};\n\nconst feeds = Array.isArray(cfg.rss_feeds)\n  ? cfg.rss_feeds\n      .map(feed => {\n        const url = String(feed?.url ?? '').trim();\n\n        return {\n          url,\n\n          source:\n            String(feed?.source ?? '').trim() ||\n            'FetchRSS',\n\n          search_keyword:\n            String(feed?.search_keyword ?? '').trim(),\n\n          location:\n            String(feed?.location ?? '').trim(),\n\n          work_mode:\n            String(feed?.work_mode ?? '').trim()\n        };\n      })\n      .filter(feed => {\n        // Only keep valid HTTP/HTTPS feed URLs.\n        if (!/^https?:\\/\\//i.test(feed.url)) {\n          return false;\n        }\n\n        // Ignore public-template placeholders that were not configured.\n        if (feed.url.startsWith('YOUR_FETCHRSS_FEED_URL_')) {\n          return false;\n        }\n\n        return true;\n      })\n  : [];\n\n\nif (!feeds.length) {\n  throw new Error(\n    'No valid RSS feeds were received from Resolve Search Plan. Configure at least one FetchRSS feed before running the workflow.'\n  );\n}\n\n\nreturn feeds.map(feed => ({\n  json: {\n    feed_url: feed.url,\n\n    source: feed.source,\n\n    search_keyword: feed.search_keyword,\n\n    default_location: feed.location,\n\n    default_work_mode: feed.work_mode,\n\n    keywords:\n      Array.isArray(cfg.keywords)\n        ? cfg.keywords\n        : [],\n\n    max_age_hours:\n      Number.isFinite(Number(cfg.max_age_hours)) &&\n      Number(cfg.max_age_hours) > 0\n        ? Number(cfg.max_age_hours)\n        : 24\n  }\n}));"
+        "jsCode": "const cfg = $input.first().json;\n\nconst feeds = (cfg.rss_feeds || [])\n  .map(feed => {\n    // Compatibilidade com feed antigo salvo apenas como URL\n    if (typeof feed === 'string') {\n      const url = feed.trim();\n\n      return {\n        url,\n        source: url.includes('rss.app')\n          ? 'RSS.app'\n          : 'FetchRSS',\n        search_keyword: '',\n        location: '',\n        work_mode: ''\n      };\n    }\n\n    const url = String(feed.url || '').trim();\n\n    return {\n      url,\n\n      source:\n        String(feed.source || '').trim() ||\n        (\n          url.includes('rss.app')\n            ? 'RSS.app'\n            : 'FetchRSS'\n        ),\n\n      search_keyword:\n        String(\n          feed.search_keyword ||\n          feed.keyword ||\n          ''\n        ).trim(),\n\n      location:\n        String(feed.location || '').trim(),\n\n      work_mode:\n        String(feed.work_mode || '').trim()\n    };\n  })\n  .filter(feed =>\n    /^https?:\\/\\//i.test(feed.url) &&\n    !feed.url.includes('PASTE_') && !feed.url.includes('YOUR_')\n  );\n\n\nif (!feeds.length) {\n  throw new Error(\n    'Nenhum RSS feed real foi configurado no Resolve Search Plan.'\n  );\n}\n\n\nreturn feeds.map(feed => ({\n  json: {\n    feed_url: feed.url,\n\n    source: feed.source,\n\n    search_keyword: feed.search_keyword,\n\n    default_location: feed.location,\n\n    default_work_mode: feed.work_mode,\n\n    keywords: cfg.keywords || [],\n\n    timezone: cfg.timezone,\n    max_age_hours: cfg.max_age_hours || 24\n  }\n}));"
       },
-      "id": "34acf625-2404-464b-8f46-efebdfc235c1",
+      "id": "e22c1228-738f-5541-9f83-1e85174ef249",
       "name": "Build RSS Feed Requests",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -42,7 +59,7 @@
       "parameters": {
         "options": {}
       },
-      "id": "b40c3a12-8873-49a3-8420-4f3cb200cfd2",
+      "id": "599def8e-e84f-5b8e-af2d-491535999275",
       "name": "Loop RSS Feeds",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
@@ -56,7 +73,7 @@
         "url": "={{ $json.feed_url }}",
         "options": {}
       },
-      "id": "7b27004f-9437-42a6-b816-8a42f497a7fb",
+      "id": "f6f9639d-a16d-5c6b-8786-9e0a40aaf79b",
       "name": "RSS Read",
       "type": "n8n-nodes-base.rssFeedRead",
       "typeVersion": 1.1,
@@ -64,13 +81,15 @@
         3808,
         1536
       ],
-      "onError": "continueRegularOutput"
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "const ctx = $('Loop RSS Feeds').item.json ?? {};\n\n// Public template default.\n// Change this value if you want spreadsheet timestamps\n// formatted in a specific local timezone.\nconst DEFAULT_TIME_ZONE = 'UTC';\n\n\nfunction clean(value) {\n  if (value === null || value === undefined) {\n    return '';\n  }\n\n  return String(value)\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/gi, ' ')\n    .replace(/&amp;/gi, '&')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n\nfunction cleanUrl(raw) {\n  if (!raw) {\n    return '';\n  }\n\n  try {\n    const decoded = String(raw)\n      .replace(/&amp;/g, '&');\n\n    const url = new URL(decoded);\n\n    // Keep LinkedIn job URLs clean while preserving\n    // the path that contains the job identifier.\n    if (\n      /linkedin\\.com$/i.test(url.hostname) ||\n      /\\.linkedin\\.com$/i.test(url.hostname)\n    ) {\n      return (\n        `${url.protocol}//${url.hostname}${url.pathname}`\n      ).replace(/\\/$/, '');\n    }\n\n    url.hash = '';\n    url.search = '';\n\n    return url\n      .toString()\n      .replace(/\\/$/, '');\n\n  } catch {\n    return String(raw)\n      .replace(/&amp;/g, '&')\n      .split('?')[0]\n      .split('#')[0]\n      .trim();\n  }\n}\n\n\nfunction jobIdFromUrl(url) {\n  const value = String(url || '');\n\n  const match =\n    value.match(\n      /\\/jobs\\/view\\/(?:[^/?#]*-)?(\\d+)(?:[/?#]|$)/i\n    ) ||\n    value.match(\n      /\\/jobs\\/view\\/(\\d+)/i\n    );\n\n  return match?.[1] || `url:${value}`;\n}\n\n\n/*\n  Returns:\n\n  DD/MM/YYYY HH:mm\n\n  without seconds.\n*/\nfunction formatDateTime(\n  value,\n  timeZone = DEFAULT_TIME_ZONE\n) {\n  const date =\n    value instanceof Date\n      ? value\n      : new Date(value);\n\n  if (Number.isNaN(date.getTime())) {\n    return '';\n  }\n\n  const parts =\n    new Intl.DateTimeFormat(\n      'en-US',\n      {\n        timeZone,\n\n        day: '2-digit',\n        month: '2-digit',\n        year: 'numeric',\n\n        hour: '2-digit',\n        minute: '2-digit',\n\n        hour12: false\n      }\n    )\n      .formatToParts(date)\n      .reduce((acc, part) => {\n        acc[part.type] = part.value;\n        return acc;\n      }, {});\n\n  return (\n    `${parts.day}/` +\n    `${parts.month}/` +\n    `${parts.year} ` +\n    `${parts.hour}:` +\n    `${parts.minute}`\n  );\n}\n\n\nfunction detectLanguage(title) {\n  const text = String(title || '')\n    .toLowerCase();\n\n  const portuguese =\n    /\\b(engenheiro|engenheira|engenharia|desenvolvedor|desenvolvedora|analista|especialista|inteligência|dados|automação|remoto|remota|estágio|estagiário|estagiária|sênior|pleno|júnior)\\b/i;\n\n  const english =\n    /\\b(engineer|developer|analyst|specialist|intelligence|automation|remote|software|machine learning|data)\\b/i;\n\n  if (portuguese.test(text)) {\n    return 'Portuguese';\n  }\n\n  if (english.test(text)) {\n    return 'English';\n  }\n\n  return '';\n}\n\n\nfunction detectTimeType(text) {\n  const value = String(text || '')\n    .toLowerCase();\n\n  if (\n    /\\bpart[- ]?time\\b|\\bmeio período\\b/i.test(value)\n  ) {\n    return 'Part-time';\n  }\n\n  if (\n    /\\bfull[- ]?time\\b|\\btempo integral\\b/i.test(value)\n  ) {\n    return 'Full-time';\n  }\n\n  return '';\n}\n\n\nfunction detectJobType(text) {\n  const value = String(text || '')\n    .toLowerCase();\n\n  const types = [];\n\n  if (\n    /\\bcontract\\b|\\bcontractor\\b|\\bcontrato\\b/i.test(value)\n  ) {\n    types.push('Contract');\n  }\n\n  if (\n    /\\binternship\\b|\\bestágio\\b|\\bestagiário\\b|\\bestagiária\\b/i.test(value)\n  ) {\n    types.push('Internship');\n  }\n\n  if (\n    /\\bfreelance\\b|\\bfreelancer\\b/i.test(value)\n  ) {\n    types.push('Freelance');\n  }\n\n  if (\n    /\\btemporary\\b|\\btemporário\\b|\\btemporária\\b/i.test(value)\n  ) {\n    types.push('Temporary');\n  }\n\n  if (\n    /\\bpj\\b|\\bpessoa jurídica\\b/i.test(value)\n  ) {\n    types.push('PJ');\n  }\n\n  if (\n    /\\bclt\\b/i.test(value)\n  ) {\n    types.push('CLT');\n  }\n\n  if (\n    /\\blong[- ]?term\\b|\\blongo prazo\\b/i.test(value)\n  ) {\n    types.push('Long-term');\n  }\n\n  return [...new Set(types)]\n    .join(', ');\n}\n\n\nfunction detectExperience(title) {\n  const value = String(title || '')\n    .toLowerCase();\n\n  // Detect combined Mid/Senior titles before\n  // checking each level individually.\n  if (\n    (\n      /\\bpleno\\b|\\bmid[- ]?level\\b|\\bmid\\b/i.test(value)\n    ) &&\n    (\n      /\\bsenior\\b|\\bsênior\\b|\\bsr\\.?\\b/i.test(value)\n    )\n  ) {\n    return 'Mid, Senior';\n  }\n\n  if (\n    /\\blead\\b|\\blíder\\b|\\blider\\b/i.test(value)\n  ) {\n    return 'Lead';\n  }\n\n  if (\n    /\\bsenior\\b|\\bsênior\\b|\\bsr\\.?\\b/i.test(value)\n  ) {\n    return 'Senior';\n  }\n\n  if (\n    /\\bspecialist\\b|\\bespecialista\\b/i.test(value)\n  ) {\n    return 'Specialist';\n  }\n\n  if (\n    /\\bpleno\\b|\\bmid[- ]?level\\b|\\bmid\\b/i.test(value)\n  ) {\n    return 'Mid';\n  }\n\n  if (\n    /\\bjunior\\b|\\bjúnior\\b|\\bjr\\.?\\b|\\bentry[- ]?level\\b|\\bassistente\\b/i.test(value)\n  ) {\n    return 'Junior';\n  }\n\n  if (\n    /\\bintern\\b|\\binternship\\b|\\bestagi[aá]ri[oa]\\b/i.test(value)\n  ) {\n    return 'Intern';\n  }\n\n  return '';\n}\n\n\n/*\n  FetchRSS can expose location information through\n  the RSS summary/content fields.\n\n  Provider boilerplate is removed before the value\n  is stored as the geographic job location.\n*/\nfunction extractLocation(item) {\n  const raw =\n    item.contentSnippet ??\n    item.description ??\n    item.summary ??\n    item.content ??\n    '';\n\n  return clean(raw)\n    .replace(\n      /\\(?\\s*Feed generated with FetchRSS\\s*\\)?/gi,\n      ''\n    )\n    .trim();\n}\n\n\nconst jobs = [];\n\n\nfor (const input of $input.all()) {\n  const item = input.json ?? {};\n\n\n  const rawUrl =\n    item.link ??\n    item.origLink ??\n    item.guid ??\n    item.url ??\n    '';\n\n\n  const url =\n    cleanUrl(rawUrl);\n\n\n  // Only LinkedIn job URLs are accepted.\n  if (\n    !/linkedin\\.com\\/jobs\\//i.test(url)\n  ) {\n    continue;\n  }\n\n\n  const published =\n    item.isoDate ??\n    item.pubDate ??\n    item.published ??\n    item.updated ??\n    '';\n\n\n  const publishedMs =\n    Date.parse(published);\n\n\n  if (\n    Number.isNaN(publishedMs)\n  ) {\n    continue;\n  }\n\n\n  /*\n    Job age is not filtered again here.\n\n    The LinkedIn search used to generate each RSS feed\n    should already contain the desired recency filter.\n\n    Duplicate protection is handled downstream using\n    the LinkedIn Job ID.\n  */\n\n\n  const title =\n    clean(item.title) ||\n    'Not specified';\n\n\n  const companyName =\n    clean(\n      item.creator ??\n      item['dc:creator'] ??\n      item.author ??\n      item.company ??\n      ''\n    );\n\n\n  const extractedLocation =\n    extractLocation(item);\n\n\n  /*\n    Geographic location can come directly from the RSS feed.\n\n    A configured default_location may optionally override it\n    when a feed represents a fixed geographic search.\n  */\n  const location =\n    clean(ctx.default_location) ||\n    extractedLocation;\n\n\n  /*\n    Work Mode is metadata configured for each feed.\n\n    Supported values:\n    Remote, Hybrid, On-site.\n\n    If the feed configuration does not explicitly provide\n    one of these values, the field remains empty.\n  */\n  const workMode =\n    [\n      'Remote',\n      'Hybrid',\n      'On-site'\n    ].includes(\n      String(\n        ctx.default_work_mode ?? ''\n      ).trim()\n    )\n      ? String(\n          ctx.default_work_mode\n        ).trim()\n      : '';\n\n\n  /*\n    This text is used only for deterministic first-pass\n    field detection.\n\n    It is not stored as the final job description because\n    RSS feeds may not contain the full LinkedIn description.\n  */\n  const sourceText =\n    [\n      title,\n      companyName,\n      extractedLocation\n    ]\n      .filter(Boolean)\n      .join(' ');\n\n\n  const scrapedNow =\n    new Date();\n\n\n  jobs.push({\n\n    // A - Job ID\n    job_id:\n      jobIdFromUrl(url),\n\n    // B - Status\n    status:\n      'To do',\n\n    // C - Date Scraped\n    date_scraped:\n      formatDateTime(\n        scrapedNow\n      ),\n\n    // D - Source\n    source:\n      ctx.source ||\n      'FetchRSS',\n\n    // E - Search Keyword\n    search_keyword:\n      ctx.search_keyword ||\n      '',\n\n    // F - Date Posted\n    date_posted:\n      formatDateTime(\n        new Date(publishedMs)\n      ),\n\n    // G - Title\n    title,\n\n    // H - Work Mode\n    work_mode:\n      workMode,\n\n    // I - URL\n    url,\n\n    // J - Company Name\n    company_name:\n      companyName,\n\n    // K - Location\n    location,\n\n    // L - Description\n    description:\n      '',\n\n    // M - Language\n    language:\n      detectLanguage(title),\n\n    // N - Payment\n    payment:\n      '',\n\n    // O - Time Type\n    time_type:\n      detectTimeType(sourceText),\n\n    // P - Job Type\n    job_type:\n      detectJobType(sourceText),\n\n    // Q - Experience\n    experience:\n      detectExperience(title),\n\n    // R - Salary\n    salary:\n      '',\n\n    // S - Match\n    match:\n      '',\n\n    // T - Qualified\n    qualified:\n      '',\n\n    // U - Cover Letter\n    cover_letter:\n      '',\n\n    // V - Notes\n    notes:\n      '',\n\n    // W - Interview At\n    interview_at:\n      '',\n\n    // X - Invite Meet\n    invite_meet:\n      '',\n\n    // Y - Attended\n    attended:\n      false,\n\n\n    // Internal workflow metadata\n\n    posted_at:\n      new Date(\n        publishedMs\n      ).toISOString(),\n\n    scraped_at:\n      scrapedNow.toISOString(),\n\n    _feed_url:\n      ctx.feed_url\n  });\n}\n\n\nreturn [{\n  json: {\n    feed_url:\n      ctx.feed_url,\n\n    source:\n      ctx.source ||\n      'FetchRSS',\n\n    search_keyword:\n      ctx.search_keyword ||\n      '',\n\n    jobs\n  }\n}];"
+        "jsCode": "const ctx = $('Loop RSS Feeds').item.json;\n\nconst keywords = Array.isArray(ctx.keywords)\n  ? ctx.keywords\n  : [];\n\n\nfunction clean(value) {\n  if (value === null || value === undefined) {\n    return '';\n  }\n\n  return String(value)\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/&nbsp;/gi, ' ')\n    .replace(/&amp;/gi, '&')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n\nfunction cleanUrl(raw) {\n  if (!raw) return '';\n\n  try {\n    const decoded = String(raw)\n      .replace(/&amp;/g, '&');\n\n    const url = new URL(decoded);\n\n    if (\n      /linkedin\\.com$/i.test(url.hostname) ||\n      /\\.linkedin\\.com$/i.test(url.hostname)\n    ) {\n      return (\n        `${url.protocol}//${url.hostname}${url.pathname}`\n      ).replace(/\\/$/, '');\n    }\n\n    url.hash = '';\n    url.search = '';\n\n    return url\n      .toString()\n      .replace(/\\/$/, '');\n\n  } catch {\n    return String(raw)\n      .replace(/&amp;/g, '&')\n      .split('?')[0]\n      .split('#')[0]\n      .trim();\n  }\n}\n\n\nfunction jobIdFromUrl(url) {\n  const value = String(url || '');\n\n  const match =\n    value.match(\n      /\\/jobs\\/view\\/(?:[^/?#]*-)?(\\d+)(?:[/?#]|$)/i\n    ) ||\n    value.match(\n      /\\/jobs\\/view\\/(\\d+)/i\n    );\n\n  return match?.[1] || `url:${value}`;\n}\n\n\nfunction keywordMatch(text, keyword) {\n  const haystack = String(text || '')\n    .toLowerCase();\n\n  const wanted = String(keyword || '')\n    .toLowerCase()\n    .trim();\n\n  if (!wanted) {\n    return false;\n  }\n\n  if (haystack.includes(wanted)) {\n    return true;\n  }\n\n  const tokens = wanted\n    .split(/\\s+/)\n    .filter(token => token.length >= 2);\n\n  return (\n    tokens.length > 0 &&\n    tokens.every(token =>\n      haystack.includes(token)\n    )\n  );\n}\n\n\n/*\n  Retorna exatamente:\n\n  DD/MM/YYYY HH:mm\n\n  Sem segundos e sem vírgula.\n*/\nfunction formatBrazilDateTime(value) {\n  const date =\n    value instanceof Date\n      ? value\n      : new Date(value);\n\n  if (Number.isNaN(date.getTime())) {\n    return '';\n  }\n\n  const parts =\n    new Intl.DateTimeFormat(\n      'en-US',\n      {\n        timeZone: ctx.timezone || 'UTC',\n\n        day: '2-digit',\n        month: '2-digit',\n        year: 'numeric',\n\n        hour: '2-digit',\n        minute: '2-digit',\n\n        hour12: false\n      }\n    )\n      .formatToParts(date)\n      .reduce((acc, part) => {\n        acc[part.type] = part.value;\n        return acc;\n      }, {});\n\n  return (\n    `${parts.day}/` +\n    `${parts.month}/` +\n    `${parts.year} ` +\n    `${parts.hour}:` +\n    `${parts.minute}`\n  );\n}\n\n\nfunction detectLanguage(title) {\n  const text = String(title || '')\n    .toLowerCase();\n\n  const portuguese =\n    /\\b(engenheiro|engenheira|engenharia|desenvolvedor|desenvolvedora|analista|especialista|inteligência|dados|automação|remoto|remota|estágio|estagiário|estagiária|sênior|pleno|júnior)\\b/i;\n\n  const english =\n    /\\b(engineer|developer|analyst|specialist|intelligence|automation|remote|software|machine learning|data)\\b/i;\n\n  if (portuguese.test(text)) {\n    return 'Portuguese';\n  }\n\n  if (english.test(text)) {\n    return 'English';\n  }\n\n  return '';\n}\n\n\nfunction detectTimeType(text) {\n  const value = String(text || '')\n    .toLowerCase();\n\n  if (\n    /\\bpart[- ]?time\\b|\\bmeio período\\b/i.test(value)\n  ) {\n    return 'Part-time';\n  }\n\n  if (\n    /\\bfull[- ]?time\\b|\\btempo integral\\b/i.test(value)\n  ) {\n    return 'Full-time';\n  }\n\n  return '';\n}\n\n\nfunction detectJobType(text) {\n  const value = String(text || '')\n    .toLowerCase();\n\n  const types = [];\n\n  if (\n    /\\bcontract\\b|\\bcontractor\\b|\\bcontrato\\b/i.test(value)\n  ) {\n    types.push('Contract');\n  }\n\n  if (\n    /\\binternship\\b|\\bestágio\\b|\\bestagiário\\b|\\bestagiária\\b/i.test(value)\n  ) {\n    types.push('Internship');\n  }\n\n  if (\n    /\\bfreelance\\b|\\bfreelancer\\b/i.test(value)\n  ) {\n    types.push('Freelance');\n  }\n\n  if (\n    /\\btemporary\\b|\\btemporário\\b|\\btemporária\\b/i.test(value)\n  ) {\n    types.push('Temporary');\n  }\n\n  if (\n    /\\bpj\\b|\\bpessoa jurídica\\b/i.test(value)\n  ) {\n    types.push('PJ');\n  }\n\n  if (\n    /\\bclt\\b/i.test(value)\n  ) {\n    types.push('CLT');\n  }\n\n  if (\n    /\\blong[- ]?term\\b|\\blongo prazo\\b/i.test(value)\n  ) {\n    types.push('Long-term');\n  }\n\n  return [...new Set(types)]\n    .join(', ');\n}\n\n\nfunction detectExperience(title) {\n  const value = String(title || '')\n    .toLowerCase();\n\n  if (\n    /\\blead\\b|\\blíder\\b|\\blider\\b/i.test(value)\n  ) {\n    return 'Lead';\n  }\n\n  if (\n    /\\bsenior\\b|\\bsênior\\b|\\bsr\\.?\\b/i.test(value)\n  ) {\n    return 'Senior';\n  }\n\n  if (\n    /\\bspecialist\\b|\\bespecialista\\b/i.test(value)\n  ) {\n    return 'Specialist';\n  }\n\n  if (\n    /\\bpleno\\b|\\bmid[- ]?level\\b|\\bmid\\b/i.test(value)\n  ) {\n    return 'Mid';\n  }\n\n  if (\n    /\\bjunior\\b|\\bjúnior\\b|\\bjr\\.?\\b/i.test(value)\n  ) {\n    return 'Junior';\n  }\n\n  if (\n    /\\bintern\\b|\\binternship\\b|\\bestagi[aá]ri[oa]\\b/i.test(value)\n  ) {\n    return 'Intern';\n  }\n\n  return '';\n}\n\n\n/*\n  No FetchRSS configuramos o Summary\n  para trazer Location.\n\n  Exemplo:\n\n  Brazil\n  (Feed generated with FetchRSS)\n*/\nfunction extractLocation(item) {\n  const raw =\n    item.contentSnippet ??\n    item.description ??\n    item.summary ??\n    item.content ??\n    '';\n\n  return clean(raw)\n    .replace(\n      /\\(?\\s*Feed generated with FetchRSS\\s*\\)?/gi,\n      ''\n    )\n    .trim();\n}\n\n\nconst jobs = [];\n\n\nfor (const input of $input.all()) {\n  const item = input.json || {};\n\n\n  const rawUrl =\n    item.link ||\n    item.origLink ||\n    item.guid ||\n    item.url ||\n    '';\n\n\n  const url =\n    cleanUrl(rawUrl);\n\n\n  // Aceita somente vagas do LinkedIn.\n  if (\n    !/^https?:\\/\\/(?:[a-z0-9-]+\\.)?linkedin\\.com\\/jobs\\//i.test(url)\n  ) {\n    continue;\n  }\n\n\n  const published =\n    item.isoDate ??\n    item.pubDate ??\n    item.published ??\n    item.updated ??\n    '';\n\n\n  const publishedMs =\n    Date.parse(published);\n\n\n  if (\n    Number.isNaN(publishedMs)\n  ) {\n    continue;\n  }\n\n\n  // Apply the reusable freshness setting independently of the source feed.\n  const ageHours = (Date.now() - publishedMs) / 3600000;\n  if (ageHours > Number(ctx.max_age_hours || 24) || ageHours < -1) continue;\n\n\n  const title =\n    clean(item.title) ||\n    'Not specified';\n\n\n  const companyName =\n    clean(\n      item.creator ??\n      item['dc:creator'] ??\n      item.author ??\n      item.company ??\n      ''\n    );\n\n\n  const extractedLocation =\n    extractLocation(item);\n\n\n  /*\n    Location representa localização geográfica.\n\n    default_location pode ser usado futuramente\n    caso um feed tenha uma localização fixa.\n\n    Atualmente o FetchRSS já entrega essa informação\n    no Summary.\n  */\n  const location =\n    clean(ctx.default_location) ||\n    extractedLocation;\n\n\n  /*\n    Work Mode vem da configuração do feed.\n\n    Neste FetchRSS atual:\n    Remote\n  */\n  const workMode =\n    [\n      'Remote',\n      'Hybrid',\n      'On-site'\n    ].includes(\n      String(\n        ctx.default_work_mode || ''\n      ).trim()\n    )\n      ? String(\n          ctx.default_work_mode\n        ).trim()\n      : '';\n\n\n  /*\n    Texto auxiliar apenas para detectar\n    campos determinísticos.\n\n    Não usamos como Description porque\n    o FetchRSS atual não fornece a descrição\n    completa da vaga.\n  */\n  const sourceText =\n    [\n      title,\n      companyName,\n      extractedLocation\n    ]\n      .filter(Boolean)\n      .join(' ');\n\n\n  const matchedKeyword =\n    keywords.find(keyword =>\n      keywordMatch(\n        sourceText,\n        keyword\n      )\n    );\n\n\n  /*\n    Atualmente keywords = [].\n\n    Cada feed já representa uma busca\n    específica do LinkedIn.\n  */\n  if (\n    keywords.length &&\n    !matchedKeyword\n  ) {\n    continue;\n  }\n\n\n  const scrapedNow =\n    new Date();\n\n\n  jobs.push({\n\n    // A - Job ID\n    job_id:\n      jobIdFromUrl(url),\n\n    // B - Status\n    status:\n      'To do',\n\n    // C - Date Scraped\n    date_scraped:\n      formatBrazilDateTime(\n        scrapedNow\n      ),\n\n    // D - Source\n    source:\n      ctx.source || 'FetchRSS',\n\n    // E - Search Keyword\n    search_keyword:\n      ctx.search_keyword || '',\n\n    // F - Date Posted\n    date_posted:\n      formatBrazilDateTime(\n        new Date(publishedMs)\n      ),\n\n    // G - Title\n    title,\n\n    // H - Work Mode\n    work_mode:\n      workMode,\n\n    // I - URL\n    url,\n\n    // J - Company Name\n    company_name:\n      companyName,\n\n    // K - Location\n    location,\n\n    // L - Description\n    description:\n      '',\n\n    // M - Language\n    language:\n      detectLanguage(title),\n\n    // N - Payment\n    payment:\n      '',\n\n    // O - Time Type\n    time_type:\n      detectTimeType(sourceText),\n\n    // P - Job Type\n    job_type:\n      detectJobType(sourceText),\n\n    // Q - Experience\n    experience:\n      detectExperience(title),\n\n    // R - Salary\n    salary:\n      '',\n\n    // S - Match\n    match:\n      '',\n\n    // T - Qualified\n    qualified:\n      '',\n\n    // U - Cover Letter\n    cover_letter:\n      '',\n\n    // V - Notes\n    notes:\n      '',\n\n    // W - Interview At\n    interview_at:\n      '',\n\n    // X - Invite Meet\n    invite_meet:\n      '',\n\n    // Y - Attended\n    attended:\n      false,\n\n\n    // Campos internos\n\n    posted_at:\n      new Date(\n        publishedMs\n      ).toISOString(),\n\n    scraped_at:\n      scrapedNow.toISOString(),\n\n    _feed_url:\n      ctx.feed_url\n  });\n}\n\n\nreturn [{\n  json: {\n    feed_url:\n      ctx.feed_url,\n\n    source:\n      ctx.source || 'FetchRSS',\n\n    search_keyword:\n      ctx.search_keyword || '',\n\n    jobs\n  }\n}];"
       },
-      "id": "c2f83ac6-5ee7-46b2-a9c8-f38eba7d6e20",
+      "id": "e990d343-8e9e-509e-8e11-658d07579f0e",
       "name": "Normalize RSS Feed",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -81,27 +100,27 @@
     },
     {
       "parameters": {
-        "jsCode": "const feedResults =\n  $input.all().map(item => item.json ?? {});\n\nconst allJobs = [];\n\nfor (const result of feedResults) {\n  const jobs =\n    Array.isArray(result.jobs)\n      ? result.jobs\n      : [];\n\n  allJobs.push(...jobs);\n}\n\nreturn [{\n  json: {\n    jobs: allJobs,\n    rss_feed_count: feedResults.length,\n    raw_job_count: allJobs.length\n  }\n}];"
+        "jsCode": "const feedResults = $input.all().map(i => i.json || {});\nconst allJobs = [];\n\nfor (const result of feedResults) {\n  const jobs = Array.isArray(result.jobs) ? result.jobs : [];\n  allJobs.push(...jobs);\n}\n\nreturn [{\n  json: {\n    jobs: allJobs,\n    rss_feed_count: feedResults.length,\n    raw_job_count: allJobs.length\n  }\n}];"
       },
-      "id": "5d1fa1ef-8112-4ece-aa1b-586dc7c6f4cd",
+      "id": "83ea8025-019d-55af-a01e-0964c22be2e0",
       "name": "Aggregate RSS Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3808,
+        3824,
         1280
       ]
     },
     {
       "parameters": {
-        "jsCode": "const jobs = Array.isArray($json.jobs)\n  ? $json.jobs\n  : [];\n\nconst seen = new Map();\n\n\nfunction completeness(job) {\n  const fields = [\n    'title',\n    'work_mode',\n    'company_name',\n    'location',\n    'description',\n    'language',\n    'payment',\n    'time_type',\n    'job_type',\n    'experience',\n    'salary'\n  ];\n\n  return fields.reduce((score, field) => {\n    const value = String(\n      job?.[field] ?? ''\n    ).trim();\n\n    return score + (value ? 1 : 0);\n  }, 0);\n}\n\n\nfor (const job of jobs) {\n  if (!job) {\n    continue;\n  }\n\n  const key = String(\n    job.job_id ??\n    job.url ??\n    ''\n  ).trim();\n\n  if (!key) {\n    continue;\n  }\n\n\n  // Keep the first occurrence of each unique job.\n  if (!seen.has(key)) {\n    seen.set(key, job);\n    continue;\n  }\n\n\n  const current =\n    seen.get(key);\n\n\n  /*\n    If the same LinkedIn job appears in multiple feeds,\n    keep the version with the highest number of populated\n    fields.\n\n    This lets overlapping search feeds improve discovery\n    coverage without creating duplicate jobs downstream.\n  */\n  if (\n    completeness(job) >\n    completeness(current)\n  ) {\n    seen.set(key, job);\n  }\n}\n\n\nreturn [...seen.values()]\n  .map(job => ({\n    json: job\n  }));"
+        "jsCode": "const jobs = Array.isArray($json.jobs)\n  ? $json.jobs\n  : [];\n\nconst seen = new Map();\n\n\nfunction completeness(job) {\n  const fields = [\n    'title',\n    'work_mode',\n    'company_name',\n    'location',\n    'description',\n    'language',\n    'payment',\n    'time_type',\n    'job_type',\n    'experience',\n    'salary'\n  ];\n\n  return fields.reduce((score, field) => {\n    const value = String(\n      job[field] || ''\n    ).trim();\n\n    return score + (value ? 1 : 0);\n  }, 0);\n}\n\n\nfor (const job of jobs) {\n  if (!job) {\n    continue;\n  }\n\n  const key = String(\n    job.job_id ||\n    job.url ||\n    ''\n  ).trim();\n\n  if (!key) {\n    continue;\n  }\n\n\n  // Primeira ocorrência da vaga.\n  if (!seen.has(key)) {\n    seen.set(key, job);\n    continue;\n  }\n\n\n  const current =\n    seen.get(key);\n\n\n  /*\n    Se a mesma vaga aparecer em mais de um feed,\n    mantemos a versão que possui mais campos\n    preenchidos.\n  */\n  if (\n    completeness(job) >\n    completeness(current)\n  ) {\n    seen.set(key, job);\n  }\n}\n\n\nreturn [...seen.values()]\n  .map(job => ({\n    json: job\n  }));"
       },
-      "id": "f7b03cad-ad3b-4a00-b656-98301c5b3390",
+      "id": "347351e4-a5af-5a82-bfa8-d7248c8ffa0a",
       "name": "Deduplicate + Split Jobs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4048,
+        4080,
         1280
       ]
     },
@@ -110,8 +129,7 @@
         "workflowId": {
           "__rl": true,
           "value": "YOUR_JOB_SAVER_WORKFLOW_ID",
-          "mode": "id",
-          "cachedResultUrl": "/workflow/YOUR_JOB_SAVER_WORKFLOW_ID"
+          "mode": "id"
         },
         "workflowInputs": {
           "mappingMode": "defineBelow",
@@ -125,25 +143,28 @@
           "waitForSubWorkflow": true
         }
       },
-      "id": "71ed9c1f-8e15-4a26-ae94-4959ef43f8ff",
+      "id": "fbd9aeb9-c5e7-5a71-aa40-3b82809bd3b9",
       "name": "Send to Job Saver",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.3,
       "position": [
-        4288,
+        4320,
         1280
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "return [{\n  json: {\n    status: 'completed',\n    source: 'rss',\n    message: 'RSS search completed.'\n  }\n}];"
+        "jsCode": "function nodeItems(name) {\n  try {\n    return $(name).all();\n  } catch {\n    return [];\n  }\n}\n\nconst aggregate =\n  nodeItems('Aggregate RSS Results')[0]?.json || {};\n\nconst uniqueJobs =\n  nodeItems('Deduplicate + Split Jobs').length;\n\nreturn [{\n  json: {\n    status: 'completed',\n    source: 'rss',\n    rss_feed_count:\n      Number(aggregate.rss_feed_count || 0),\n    raw_job_count:\n      Number(aggregate.raw_job_count || 0),\n    unique_job_count:\n      uniqueJobs,\n    message:\n      'RSS search completed.'\n  }\n}];"
       },
-      "id": "481fa164-2a71-4fc5-b571-a301aec3cae3",
+      "id": "c49901ff-280f-565a-99f7-893d54fa0d61",
       "name": "Run Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4512,
+        4560,
         1280
       ]
     },
@@ -153,21 +174,27 @@
           "interval": [
             {
               "triggerAtHour": 7
+            },
+            {
+              "triggerAtHour": 12
+            },
+            {
+              "triggerAtHour": 18
             }
           ]
         }
       },
-      "id": "5250b773-77e8-4c36-99e5-8a75f231a21c",
-      "name": "Schedule - 1x Daily",
+      "id": "baf99546-fa45-5aee-8bc0-1c3e664f3ea2",
+      "name": "Schedule - 07h, 12h, 18h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         2864,
         1520
-      ]
+      ],
+      "disabled": true
     }
   ],
-  "pinData": {},
   "connections": {
     "Manual Trigger": {
       "main": [
@@ -178,6 +205,11 @@
             "index": 0
           }
         ]
+      ]
+    },
+    "MCP / Codex Webhook": {
+      "main": [
+        []
       ]
     },
     "Resolve Search Plan": {
@@ -275,7 +307,7 @@
         ]
       ]
     },
-    "Schedule - 1x Daily": {
+    "Schedule - 07h, 12h, 18h": {
       "main": [
         [
           {
@@ -287,24 +319,11 @@
       ]
     }
   },
-  "active": false,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate",
-    "availableInMCP": false
+    "timezone": "UTC"
   },
-  "versionId": "4e0dea10-22ec-4155-b00f-3acd845f3eed",
-  "meta": {
-    "instanceId": "759b65fe6e3f9dc383eb92635fd5e595db474b16d593150f1dbb4d4ac5411965"
-  },
-  "nodeGroups": [],
-  "id": "5ya78Earp3VlP4VQ",
-  "tags": [
-    {
-      "updatedAt": "2026-09-17T14:10:11.874Z",
-      "createdAt": "2026-09-17T14:10:11.874Z",
-      "id": "kDnxvjMsDq9SJpEM",
-      "name": "Github"
-    }
-  ]
+  "active": false,
+  "pinData": {}
 }

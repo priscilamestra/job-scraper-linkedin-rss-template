@@ -1,0 +1,340 @@
+{
+  "name": "TEMPLATE - 05 Job Cleanup",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3,
+              "triggerAtMinute": 40
+            }
+          ]
+        }
+      },
+      "id": "cd5bdc8e-7930-51db-b3b8-e6cc5bf76fce",
+      "name": "Schedule - Daily 03:40",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        192,
+        432
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst cfg = $('Config').first().json;\nconst TARGET_STATUSES = new Set(cfg.target_statuses.map(s => s.toLowerCase()));\nconst WORKBOOK_YEAR = cfg.workbook_year;\nconst AGE_DAYS = cfg.age_days;\nconst cutoffMs = Date.now() - AGE_DAYS * 24 * 60 * 60 * 1000;\nconst validSheets = cfg.monthly_sheets;\n\nfunction parseBrazilDate(value) {\n  const text = String(value ?? '').trim();\n  if (!text) return null;\n\n  const match = text.match(/^(\\d{1,2})\\/(\\d{1,2})(?:\\/(\\d{4}))?(?:\\s+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?)?$/);\n  if (!match) return null;\n\n  const day = Number(match[1]);\n  const month = Number(match[2]);\n  const year = match[3] ? Number(match[3]) : WORKBOOK_YEAR;\n  const hour = match[4] ? Number(match[4]) : 0;\n  const minute = match[5] ? Number(match[5]) : 0;\n  const second = match[6] ? Number(match[6]) : 0;\n\n  if (hour > 23 || minute > 59 || second > 59) return null;\n\n  const calendarCheck = new Date(Date.UTC(year, month - 1, day));\n  if (\n    calendarCheck.getUTCFullYear() !== year ||\n    calendarCheck.getUTCMonth() !== month - 1 ||\n    calendarCheck.getUTCDate() !== day\n  ) return null;\n\n  const wall = Date.UTC(year, month-1, day, hour, minute, second);\n  let stamp = wall;\n  for (let i=0; i<3; i++) {\n    const p = new Intl.DateTimeFormat('en-GB', {timeZone:cfg.timezone, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(stamp)).reduce((a,p)=>(a[p.type]=p.value,a),{});\n    stamp += wall - Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+p.second);\n  }\n  return stamp;\n}\n\nconst rowsBySheet = Object.fromEntries(validSheets.map(sheet => [sheet, []]));\nconst ignoredInvalidDateRows = [];\n\nfor (const item of items) {\n  const row = item.json || {};\n  const sheet = String(row._cleanup_sheet || '').trim();\n  if (!validSheets.includes(sheet)) continue;\n\n  const rowNumber = Number(row.row_number ?? row.rowNumber ?? row['Row Number']);\n  if (!Number.isInteger(rowNumber) || rowNumber < 2) continue;\n\n  const status = String(row.Status ?? row.status ?? '').trim().toLowerCase();\n  if (!TARGET_STATUSES.has(status)) continue;\n\n  const dateText = String(\n    row['Date Scraped'] ??\n    row.date_scraped ??\n    row['Date scraped'] ??\n    ''\n  ).trim();\n\n  const scrapedAtMs = parseBrazilDate(dateText);\n\n  if (scrapedAtMs === null) {\n    ignoredInvalidDateRows.push({\n      sheet,\n      row: rowNumber,\n      status: row.Status ?? row.status ?? '',\n      date_scraped: dateText,\n    });\n    continue;\n  }\n\n  if (scrapedAtMs <= cutoffMs) rowsBySheet[sheet].push(rowNumber);\n}\n\nconst blocks = [];\nconst bySheet = {};\n\nfor (const sheet of validSheets) {\n  const rows = [...new Set(rowsBySheet[sheet])].sort((a, b) => b - a);\n  bySheet[sheet] = rows.length;\n  if (!rows.length) continue;\n\n  let high = rows[0];\n  let low = rows[0];\n\n  const addBlock = () => {\n    blocks.push({\n      sheet_name: sheet,\n      start_row: low,\n      number_to_delete: high - low + 1,\n      rows: { from: low, to: high },\n    });\n  };\n\n  for (let index = 1; index < rows.length; index++) {\n    const rowNumber = rows[index];\n\n    if (rowNumber === low - 1) {\n      low = rowNumber;\n    } else {\n      addBlock();\n      high = rowNumber;\n      low = rowNumber;\n    }\n  }\n\n  addBlock();\n}\n\nconst matchedRows = Object.values(bySheet).reduce((sum, count) => sum + count, 0);\n\nreturn [{\n  json: {\n    has_rows_to_delete: blocks.length > 0,\n    blocks,\n    matched_rows: matchedRows,\n    ignored_invalid_dates: ignoredInvalidDateRows.length,\n    ignored_invalid_date_rows: ignoredInvalidDateRows,\n    by_sheet: bySheet,\n    cutoff_iso: new Date(cutoffMs).toISOString(),\n    dry_run: cfg.dry_run,\n    policy: 'Delete rows matching configured statuses and retention age.',\n  },\n}];"
+      },
+      "id": "a60e89a9-11fc-5ac7-a8e8-d16887eb7aa9",
+      "name": "Build Cleanup Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1232,
+        432
+      ],
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-cleanup-rows",
+              "leftValue": "={{ $json.has_rows_to_delete && $json.dry_run === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "392d08c5-b9f0-5b55-800a-917899f75c50",
+      "name": "Has Rows to Delete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1488,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $input.first()?.json || {};\nconst blocks = Array.isArray(plan.blocks) ? plan.blocks : [];\nreturn blocks.map(block => ({\n  json: {\n    ...block,\n    cleanup_cutoff_iso: plan.cutoff_iso,\n  },\n}));"
+      },
+      "id": "17feee53-0ea1-5c10-b725-b873010230f8",
+      "name": "Expand Delete Blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('Build Cleanup Plan').first().json;\nreturn [{\n  json: {\n    status: 'completed',\n    deleted_rows: plan.matched_rows,\n    deletion_blocks: plan.blocks.length,\n    by_sheet: plan.by_sheet,\n    ignored_invalid_dates: plan.ignored_invalid_dates,\n    cutoff_iso: plan.cutoff_iso,\n  },\n}];"
+      },
+      "id": "f9ba5f55-3eef-5601-b7a0-7dfaee8f0dc8",
+      "name": "Cleanup Completed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2272,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config').first().json.spreadsheet_id }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $json.sheet_name }}"
+        },
+        "startIndex": "={{ $json.start_row }}",
+        "numberToDelete": "={{ $json.number_to_delete }}"
+      },
+      "id": "ccce8657-96f0-5c9b-9d47-8cd0c1f7adc4",
+      "name": "Delete Expired Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2272,
+        400
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "e6645af7-0338-5ead-9a44-2b0e6a557182",
+      "name": "Delete Blocks Sequentially",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2000,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{status:$json.dry_run ? 'dry_run' : 'completed', deleted_rows:0, matched_rows:$json.matched_rows, blocks:$json.blocks, by_sheet:$json.by_sheet, ignored_invalid_dates:$json.ignored_invalid_dates, cutoff_iso:$json.cutoff_iso}}];"
+      },
+      "id": "11512146-971a-5ba1-a69e-f34255e35cfb",
+      "name": "Nothing to Delete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = {\n  spreadsheet_id: 'YOUR_GOOGLE_SHEET_ID',\n  cv_active_folder_id: 'YOUR_CV_ACTIVE_FOLDER_ID',\n  timezone: 'UTC',\n  // Keep the same twelve sheet names in every workflow.\n  monthly_sheets: [\"JANEIRO\", \"FEVEREIRO\", \"MARÇO\", \"ABRIL\", \"MAIO\", \"JUNHO\", \"JULHO\", \"AGOSTO\", \"SETEMBRO\", \"OUTUBRO\", \"NOVEMBRO\", \"DEZEMBRO\"],\n};\nif (cfg.spreadsheet_id.startsWith('YOUR_')) throw new Error('Configure spreadsheet_id in Config.');\nnew Intl.DateTimeFormat('en-US', {timeZone: cfg.timezone});\n\ncfg.workbook_year = new Date().getUTCFullYear(); // Used only for dates without an explicit year.\ncfg.age_days = 90;\ncfg.target_statuses = ['Mismatch', 'Closed'];\ncfg.dry_run = true; // Review the plan before changing to false.\nif (!Number.isInteger(cfg.age_days) || cfg.age_days < 1) throw new Error('age_days must be a positive integer.');\nreturn [{json:cfg}];\n"
+      },
+      "id": "94c4f467-26d0-584a-8ac7-67ddd4f41fe6",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -700,
+        -300
+      ]
+    },
+    {
+      "id": "24cbbe84-150f-55c5-9300-f9a2614238d2",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -950,
+        -300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "9ddedca5-ac50-5d5b-b54b-4b20a5347ffa",
+      "name": "Read Monthly Cleanup Rows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        -300
+      ],
+      "parameters": {
+        "url": "={{ 'https://sheets.googleapis.com/v4/spreadsheets/' + $json.spreadsheet_id + '/values:batchGet?valueRenderOption=FORMATTED_VALUE&' + $json.monthly_sheets.map(s => 'ranges=' + encodeURIComponent(\"'\" + s.replaceAll(\"'\", \"''\") + \"'!A:C\")).join('&') }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {}
+      }
+    },
+    {
+      "id": "09f5f805-c512-5be6-8662-56e7f96de714",
+      "name": "Normalize Cleanup Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -150,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "const rows = [];\nfor (const range of $json.valueRanges || []) {\n const sheet = String(range.range || '').split('!')[0].replace(/^'|'$/g, '').replaceAll(\"''\", \"'\");\n for (let i=1; i<(range.values || []).length; i++) {\n  const r=range.values[i];\n  rows.push({json:{_cleanup_sheet:sheet, row_number:i+1, 'Job ID':r[0], Status:r[1], 'Date Scraped':r[2]}});\n }\n}\nreturn rows.length ? rows : [{json:{}}];\n"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule - Daily 03:40": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cleanup Plan": {
+      "main": [
+        [
+          {
+            "node": "Has Rows to Delete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Rows to Delete?": {
+      "main": [
+        [
+          {
+            "node": "Expand Delete Blocks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing to Delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Delete Blocks": {
+      "main": [
+        [
+          {
+            "node": "Delete Blocks Sequentially",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Expired Rows": {
+      "main": [
+        [
+          {
+            "node": "Delete Blocks Sequentially",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Blocks Sequentially": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Completed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete Expired Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Read Monthly Cleanup Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Monthly Cleanup Rows": {
+      "main": [
+        [
+          {
+            "node": "Normalize Cleanup Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Cleanup Rows": {
+      "main": [
+        [
+          {
+            "node": "Build Cleanup Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "UTC"
+  },
+  "active": false,
+  "pinData": {}
+}

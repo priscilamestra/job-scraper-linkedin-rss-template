@@ -1,21 +1,25 @@
-﻿# LinkedIn Job Scraper & AI Application Pipeline
+# LinkedIn Job Scraper & AI Application Pipeline
 
-![n8n](https://img.shields.io/badge/n8n-Workflow%20Automation-EA4B71?style=flat-square&logo=n8n&logoColor=white) ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=000000) ![AI Automation](https://img.shields.io/badge/AI-Automation-6C63FF?style=flat-square) ![Groq](https://img.shields.io/badge/Groq-API-F55036?style=flat-square) ![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?style=flat-square&logo=googlesheets&logoColor=white) ![Google Drive](https://img.shields.io/badge/Google%20Drive-4285F4?style=flat-square&logo=googledrive&logoColor=white) ![LinkedIn](https://img.shields.io/badge/LinkedIn-Job%20Discovery-0A66C2?style=flat-square&logo=linkedin&logoColor=white) ![API Integration](https://img.shields.io/badge/API-Integration-0A66C2?style=flat-square) 
+![n8n](https://img.shields.io/badge/n8n-Workflow%20Automation-EA4B71?style=flat-square&logo=n8n&logoColor=white) ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=000000) ![AI Automation](https://img.shields.io/badge/AI-Automation-6C63FF?style=flat-square) ![Groq](https://img.shields.io/badge/Groq-API-F55036?style=flat-square) ![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?style=flat-square&logo=googlesheets&logoColor=white) ![Google Drive](https://img.shields.io/badge/Google%20Drive-4285F4?style=flat-square&logo=googledrive&logoColor=white) ![LinkedIn](https://img.shields.io/badge/LinkedIn-Job%20Discovery-0A66C2?style=flat-square&logo=linkedin&logoColor=white) ![API Integration](https://img.shields.io/badge/API-Integration-0A66C2?style=flat-square)
 
 A **low-cost, human-in-the-loop job intelligence and application-support pipeline** built with n8n.
 
-The system monitors configurable LinkedIn job searches, identifies new postings, enriches incomplete job data, evaluates technical fit against an active resume, stores opportunities in a structured Google Sheets workspace, and generates fact-checked recruiter outreach messages **only after human qualification**.
+The system monitors configurable LinkedIn job searches and Gmail job alerts, identifies new postings, enriches incomplete job data, evaluates technical fit against an active resume, stores opportunities in a structured Google Sheets workspace, and generates fact-checked recruiter outreach messages **only after human qualification**.
 
-The project is composed of three independent n8n workflows:
+The project is composed of five independent n8n workflows:
 
 ```text
-Job-scraper-LinkedIn
-        ↓
-Job-saver-LinkedIn
-        ↓
-Human Qualification
-        ↓
-Cover-letter-generator
+Job-scraper-LinkedIn --------+
+                           |
+LinkedIn-job-alerts-gmail --+--> Job-saver-LinkedIn
+                                      |
+                               Google Sheets
+                                      |
+                              Human Qualification
+                                      |
+                           Cover-letter-generator
+
+Google Sheets --> Job cleanup --> Retention maintenance
 ```
 
 Each workflow has a separate responsibility, execution pattern, and cost profile.
@@ -56,7 +60,7 @@ It was to decide **which operations should remain rule-based, which genuinely be
 
 ## Solution
 
-I built the system as three specialized n8n workflows connected through Google Drive, Google Sheets, LinkedIn public job pages, FetchRSS, and Groq.
+I built the system as five specialized n8n workflows connected through Google Drive, Google Sheets, Gmail, LinkedIn public job pages, FetchRSS, and Groq.
 
 The complete pipeline:
 
@@ -77,7 +81,9 @@ The complete pipeline:
 15. processes only manually qualified opportunities;
 16. generates recruiter outreach through Groq;
 17. performs a second factual AI review against the resume;
-18. updates only the intended Google Sheets cell.
+18. updates only the intended Google Sheets cell;
+19. routes processed and unsupported email alerts through separate Gmail labels;
+20. maintains old records through an independent retention workflow.
 
 The system is intentionally **not an autonomous mass-application bot**.
 
@@ -91,6 +97,8 @@ AI estimates professional fit and assists with recruiter communication, but the 
 </p>
 
 ## Architecture
+
+The original RSS, enrichment, and recruiter-message architecture is preserved below. The Gmail input joins the same saver; retention reads the tracker separately.
 
 ```text
                     LINKEDIN JOB SEARCHES
@@ -144,7 +152,12 @@ AI estimates professional fit and assists with recruiter communication, but the 
                        Google Sheets
 ```
 
-The workflows are separated intentionally because discovery, enrichment, qualification, and recruiter communication have different responsibilities and execution frequencies.
+The workflows are separated intentionally because discovery, enrichment, qualification, recruiter communication, and retention have different responsibilities and execution frequencies.
+
+```text
+Gmail alerts -> LinkedIn-job-alerts-gmail -> Job-saver-LinkedIn
+Google Sheets -> Job cleanup -> Retention plan -> Eligible row deletion
+```
 
 ## Workflow 1 — Job-scraper-LinkedIn
 
@@ -216,7 +229,7 @@ Conceptually:
 }
 ```
 
-Additional feed objects can be added to `rss_feeds` without changing the workflow logic.
+Additional feed objects can be added to `rss_feeds` without changing the workflow logic. Set `timezone` in `Resolve Search Plan`; the reusable normalizer enforces `max_age_hours` independently of the LinkedIn feed search.
 
 The architecture allows multiple overlapping LinkedIn searches.
 
@@ -304,6 +317,14 @@ PDF text extraction
 for every job in the same execution.
 
 Replacing the PDF in the active-resume folder automatically changes the resume used by future executions without requiring workflow-code changes.
+
+## Publication-Date Policy and Final Routing
+
+The public saver exposes optional `publication_start` and `publication_end` in `Config`. Both accept YYYY-MM-DD dates. Blank bounds permit any parseable publication date; configure an annual window when the tracker represents a single year.
+
+Invalid calendar dates and missing publication dates are rejected. If the public page exposes an out-of-window date but the incoming alert supplies an in-window date, the alert date is used as a fallback. The final monthly tab is chosen after this validation, using the corresponding next-row position from historical deduplication.
+
+The twelve `monthly_sheets` names must remain consistent across the saver, recruiter-message workflow, cleanup, and workbook. The template defaults to UTC; set the intended timezone in both workflow settings and configuration nodes.
 
 ## Duplicate Check Before Expensive Processing
 
@@ -664,7 +685,11 @@ The template preserves the operational structure used by the workflows:
 - visual formatting and status colors;
 - the `Qualified` review field;
 - the `Attended` tracking field;
-- empty job rows with no personal or production data.
+- empty job rows with no personal or production data;
+- `LinkedIn Alert` in the Source dropdown;
+- filters across A1:Y1000 on all twelve tabs;
+- frozen header row and columns A:B;
+- year-inclusive capture and publication date formats.
 
 The included workbook intentionally keeps the monthly tab names used by the reference workflows:
 
@@ -701,9 +726,9 @@ However, changes to the worksheet structure may require corresponding workflow c
 
 | Spreadsheet change | Workflow updates required |
 |---|---|
-| Create a new Google Drive copy of the spreadsheet | Update the Spreadsheet ID in Workflow 2 (`Prepare Monthly Row` and `Save New Job`) and Workflow 3 (`Config`). |
-| Rename monthly tabs | Update the `months` array in Workflow 2 `Prepare Monthly Row` and the ranges in Workflow 3 `Read All Monthly Sheets`. |
-| Add or remove monthly tabs | Update the same month/range lists in Workflow 2 `Prepare Monthly Row` and Workflow 3 `Read All Monthly Sheets`. |
+| Create a new Google Drive copy of the spreadsheet | Update the Spreadsheet ID in the `Config` nodes in Workflows 2, 3 and 5. |
+| Rename monthly tabs | Update the `monthly_sheets` lists in the Config nodes of Workflows 2, 3 and 5. |
+| Add or remove monthly tabs | Update the same `monthly_sheets` lists in Workflows 2, 3 and 5. |
 | Move `Job ID` away from column A | Update Workflow 2 `Prepare Monthly Row` dedupe ranges, `Check Duplicate` column lookup/range logic, and any affected row mappings. |
 | Change the column order | Update the A:Y `row_values` mappings in Workflow 2 (`Prepare Monthly Row`, `Prepare AI Input`, `Parse AI Result`, `Handle AI Failure`) and the positional indexes in Workflow 3 `Filter Qualified Jobs`. |
 | Change the total column span from A:Y | Update Workflow 2 write ranges and Workflow 3 `Read All Monthly Sheets` ranges. |
@@ -714,7 +739,7 @@ However, changes to the worksheet structure may require corresponding workflow c
 | Rename only most header labels without moving columns | Usually no change is required because the workflows are position-based. If `Job ID` is renamed, also update the header-skip check in Workflow 2 `Check Duplicate`. |
 | Change dropdown option values | Update the allowed-value normalization in Workflow 2 (`Format Jobs`, `Prepare AI Input`, `Parse AI Result`) and any Workflow 3 conditions that depend on those exact values, such as `Qualified = Yeap`. |
 
-Workflow 1 does not write directly to Google Sheets, so spreadsheet-only structural changes normally affect Workflows 2 and 3 rather than `Job-scraper-LinkedIn`.
+The two discovery workflows do not write directly to Google Sheets. Spreadsheet changes affect the saver, recruiter-message workflow, and cleanup. Cleanup also relies on Status and Date Scraped in B:C. The exact contract and conversion limits are documented in [Docs/SPREADSHEET.md](Docs/SPREADSHEET.md).
 
 ## Workflow 3 — Cover-letter-generator
 
@@ -776,6 +801,99 @@ Parse Final Message
         v
 Update Cover Letter Cell
 ```
+
+## Workflow 4 — LinkedIn-job-alerts-gmail
+
+### Purpose
+
+`LinkedIn-job-alerts-gmail` adds a second discovery input using LinkedIn job alerts received through Gmail. It shares `Job-saver-LinkedIn` with RSS discovery, so jobs found in both sources use the same historical duplicate check.
+
+### Processing flow
+
+```text
+Schedule / Manual Trigger
+        |
+        v
+Alert Configuration
+        |
+        v
+Resolve Gmail Labels
+        |
+        v
+Find Unprocessed Alerts
+        |
+        v
+Loop Gmail Alerts
+        |
+        v
+Get Email + Extract LinkedIn Job IDs
+        |
+        +--- invalid / unsupported ---> Mark for Review
+        |
+        v
+Split Candidate Jobs
+        |
+        v
+Execute Job-saver-LinkedIn
+        |
+        v
+Mark Processed -> Next Email -> Run Summary
+```
+
+### Labels and configuration
+
+`Alert Configuration` defines the allowed sender, incoming label, processed label, review label, maximum messages per run, and optional keyword mappings. Labels are resolved by name in the connected Gmail account; missing labels stop the run with a configuration error.
+
+The workflow does not create the Gmail filter that assigns the incoming label. Incoming messages must be labeled through a Gmail filter or manually.
+
+### Extraction and review
+
+The parser recovers LinkedIn Job IDs from direct and encoded links, normalizes job URLs, deduplicates repeated links within the same email, and preserves the alert's search label and publication date. Optional mappings can translate an alert identifier into a different search label.
+
+Unexpected senders, unsupported subject/body formats, missing job IDs, unparsed job links, and failed authentication headers when present route to the review label. Missing authentication headers are accepted by the current parser; this is not proof of authenticated delivery.
+
+The current parser expects English alert markers and an English `posted on MM/DD/YYYY` subject. Other formats need parser adaptation; unsupported messages remain available under the review label.
+
+### Processing state
+
+The processed label is applied after the saver subworkflow returns. It means the alert was handled, not that every candidate was inserted. Jobs can be skipped because they already exist or fail the publication-date policy. Check the saver output and spreadsheet independently when verifying delivery.
+
+## Workflow 5 — Job cleanup
+
+### Purpose
+
+The retention workflow maintains the tracker separately from discovery, enrichment, and recruiter messages. Its default policy selects rows whose `Status` is `Mismatch` or `Closed` and whose `Date Scraped` is at least 90 days old.
+
+### Processing flow
+
+```text
+Read Monthly Capture Dates and Statuses
+        |
+        v
+Validate Dates + Protect Header and Other Statuses
+        |
+        v
+Build Retention Plan
+        |
+        v
+Group Adjacent Rows
+        |
+        v
+Process Blocks from Bottom to Top
+        |
+        v
+Cleanup Summary
+```
+
+### Template configuration and dry-run mode
+
+The public cleanup exposes `spreadsheet_id`, `monthly_sheets`, `workbook_year`, `timezone`, `age_days`, `target_statuses` and `dry_run` in Config. It scans all twelve configured tabs. With `dry_run: true`, the workflow returns the proposed plan and skips deletion. Change it to false only after reviewing representative test rows.
+
+### Data integrity
+
+Only eligible statuses and valid dates enter the deletion plan. Rows with other statuses, invalid dates, or header-row numbers are excluded. Adjacent rows are grouped into blocks and processed in descending row order so earlier deletions do not shift later targets.
+
+Deletion removes the entire row, including any notes and interview fields. Test retention against a disposable spreadsheet before enabling deletion. Retention does not send applications or recruiter messages.
 
 ## Why Cover-letter-generator Uses Direct Groq API Requests
 
@@ -1034,9 +1152,11 @@ Row becomes ineligible
 
 The next scheduled run therefore ignores already completed records.
 
+The historical check and row write are not one atomic operation. Overlapping RSS and Gmail saver runs can still race; use non-overlapping runs or an appropriate instance-level concurrency policy.
+
 ## Reliability and Engineering Decisions
 
-### Three-workflow separation of concerns
+### Five-workflow separation of concerns
 
 The system separates:
 
@@ -1096,7 +1216,7 @@ Search terms and RSS feeds remain configuration rather than being tied to one pe
 
 ### LinkedIn page retrieval fails
 
-Known RSS data can still be preserved.
+Known incoming data can still be preserved if a usable publication date remains available. Otherwise the publication-date branch skips the candidate.
 
 Missing fields remain unresolved instead of being fabricated.
 
@@ -1184,7 +1304,8 @@ Provider limits may change over time, so exact free-tier capacities should alway
 | Layer | Technology |
 |---|---|
 | Workflow orchestration | n8n |
-| Job discovery | LinkedIn public search |
+| Job discovery | LinkedIn public search and email alerts |
+| Email integration | Gmail OAuth2 and label routing |
 | RSS generation | FetchRSS |
 | Feed ingestion | RSS |
 | Data transformation | JavaScript |
@@ -1203,41 +1324,43 @@ Provider limits may change over time, so exact free-tier capacities should alway
 ## Repository Structure
 
 ```text
-job-scraper-linkedin-rss/
-│
+job-scraper-linkedin-rss-template/
 ├── Workflows/
-│   ├── 01-job-scraper-linkedin.json
-│   ├── 02-job-saver-linkedin.json
-│   └── 03-cover-letter-generator.json
-│
+│   ├── TEMPLATE - 01 Job Scraper LinkedIn.json
+│   ├── TEMPLATE - 02 Job Saver LinkedIn.json
+│   ├── TEMPLATE - 03 Cover letter generator.json
+│   ├── TEMPLATE - 04 LinkedIn Job Alerts Gmail.json
+│   └── TEMPLATE - 05 Job Cleanup.json
 ├── Docs/
-│   └── job-tracker-template.xlsx
-│
+│   ├── job-tracker-template.xlsx
+│   ├── SETUP.md
+│   ├── SPREADSHEET.md
+│   └── VALIDATION.md
 ├── Images/
-│   ├── google-sheets-job-tracker-01.png
-│   ├── google-sheets-job-tracker-02.png
-│   └── fetchrss-linkedin-feed.png
-│
+├── tests/
 ├── .gitignore
 ├── LICENSE
 └── README.md
 ```
 
+
 ## Configuration
 
-| Setting | Purpose | Example |
+| Setting | Purpose | Where to configure |
 |---|---|---|
-| `SEARCH_KEYWORD_1` | LinkedIn search term | `YOUR_SEARCH_KEYWORD_1` |
-| `FETCHRSS_FEED_1` | RSS URL for the search | `YOUR_FETCHRSS_FEED_URL_1` |
-| `SEARCH_LOCATION` | Optional geographic label stored with the feed | `YOUR_LOCATION` |
-| `SEARCH_WORK_MODE` | Optional work-mode label stored with the feed | `YOUR_WORK_MODE` |
-| `GOOGLE_SHEET_ID` | Job tracker spreadsheet | `YOUR_GOOGLE_SHEET_ID` |
-| `CV_ACTIVE_FOLDER` | Google Drive active resume folder | `YOUR_CV_ACTIVE_FOLDER_ID` |
-| `TIMEZONE` | n8n workflow timezone | `America/Sao_Paulo` |
-| `SCRAPER_CRON` | Discovery schedule | `0 7 * * *` |
-| `OUTREACH_CRON` | Qualified-job polling schedule | `0 8,10,12,14,16,18,20 * * *` |
+| RSS feed URL and search label | Your LinkedIn searches | Workflow 1 → Resolve Search Plan |
+| Location, work mode, freshness, timezone | Feed metadata and local filtering | Workflow 1 → Resolve Search Plan |
+| Spreadsheet ID and active CV folder | Your tracker and PDF resume | Workflows 2 and 3 → Config |
+| Publication start/end | Optional YYYY-MM-DD bounds | Workflow 2 → Config |
+| Monthly sheet names | Twelve tabs in calendar order | Workflows 2, 3 and 5 → Config |
+| Gmail labels and optional keyword mappings | Incoming / processed / review routing | Workflow 4 → Alert Configuration |
+| Saver workflow ID | Link both discovery inputs to your imported saver | Workflows 1 and 4 → Send to Job Saver |
+| Retention age, statuses and dry-run mode | Optional maintenance policy | Workflow 5 → Config |
+| Timezone | Consistent timestamps and schedules | Each Config and workflow settings |
+| Provider models | Exported Groq model selections | Groq Chat Model and both direct Groq request nodes |
 
-These represent configuration concepts and do not need to be literal environment variables unless the workflow is later refactored to use them that way.
+Placeholders begin with `YOUR_`. Replace them with your own configuration; credential secrets belong in n8n Credentials. The template defaults to UTC and has no personal keyword mappings or account selectors.
+
 
 ## Setup Order
 
@@ -1292,79 +1415,37 @@ FetchRSS Feed
 
 ### 5. Import Job-saver-LinkedIn
 
-Import:
-
-```text
-02-job-saver-linkedin.json
-```
-
-Configure:
-
-- Google Drive credential;
-- replace `YOUR_CV_ACTIVE_FOLDER_ID` in `Find Active CV`;
-- Google Sheets credential;
-- replace `YOUR_GOOGLE_SHEET_ID` in `Prepare Monthly Row` and `Save New Job`;
-- Groq credential.
-
-This workflow must exist before `Job-scraper-LinkedIn` can execute it.
+Import `Workflows/TEMPLATE - 02 Job Saver LinkedIn.json` first. Set spreadsheet ID, CV folder, timezone, monthly tabs and optional publication bounds in Config. Select Google Sheets, Google Drive and Groq credentials in the corresponding nodes. Record its newly imported workflow ID.
 
 ### 6. Import Job-scraper-LinkedIn
 
-Import:
-
-```text
-01-job-scraper-linkedin.json
-```
-
-Configure:
-
-- `Resolve Search Plan` with `YOUR_FETCHRSS_FEED_URL_1`, `YOUR_SEARCH_KEYWORD_1`, and optional location/work-mode values;
-- reference to `Job-saver-LinkedIn` in `Send to Job Saver`;
-- workflow timezone;
-- schedule only after manual validation.
-
-The public template ships with the schedule trigger disabled to prevent accidental executions immediately after import.
+Import `Workflows/TEMPLATE - 01 Job Scraper LinkedIn.json`. Configure your RSS feeds and search labels in Resolve Search Plan. Select the imported saver in Send to Job Saver. The disabled, unconnected webhook is not a configured API endpoint.
 
 ### 7. Import Cover-letter-generator
 
-Import:
+Import `Workflows/TEMPLATE - 03 Cover letter generator.json`. Set Config and select credentials in both Drive nodes, both Sheets requests, and both direct Groq request nodes.
 
-```text
-03-cover-letter-generator.json
-```
+### 8. Import LinkedIn Gmail alerts
 
-Configure:
+Import `Workflows/TEMPLATE - 04 LinkedIn Job Alerts Gmail.json`. Create and configure your three Gmail labels, select Gmail credentials in all five Gmail nodes, and select the imported saver. The source-label Gmail filter is configured separately in Gmail.
 
-- replace `YOUR_GOOGLE_SHEET_ID` and `YOUR_CV_ACTIVE_FOLDER_ID` in the `Config` node;
-- Google Sheets credential in `Read All Monthly Sheets` and `Update Cover Letter`;
-- Google Drive credential in `Find Active CV` and `Download Active CV`;
-- Groq credential in `Groq - Generate Cover Letter` and `Fact Check Cover Letter`;
-- workflow timezone;
-- schedule only after manual validation.
+### 9. Import cleanup in dry-run mode
 
-The public template ships with the schedule trigger disabled. Its default cron is `0 8,10,12,14,16,18,20 * * *`.
+Import `Workflows/TEMPLATE - 05 Job Cleanup.json`. Configure your tracker, tabs, timezone and retention policy. Keep `dry_run: true`. Select Sheets credentials in Read Monthly Cleanup Rows and Delete Expired Rows.
 
-### 8. Validate manually
+### 10. Validate manually
 
-Recommended validation sequence:
+Run `node tests/workflows.test.mjs` and `python tests/tracker.test.py` locally. Then use the disposable-resource test sequence in [Docs/SETUP.md](Docs/SETUP.md): test a job, a repeated job, an alert requiring review, one qualified recruiter message, and the retention dry-run plan. Confirm each actual destination separately.
 
-```text
-Run Job-scraper-LinkedIn
-        ↓
-Job-saver-LinkedIn stores new vacancies
-        ↓
-Inspect Google Sheets
-        ↓
-Set `Qualified = Yeap` for one or two jobs
-        ↓
-Run Cover-letter-generator
-        ↓
-Verify recruiter-message cells
-```
+All templates ship inactive with automatic triggers disabled. Configure your timezone in both workflow settings and Config before enabling schedules. Review model availability and response shapes with your own provider account.
 
-For the Cover Letter workflow test, use a row where `Qualified = Yeap`, `Cover Letter` is blank, and `Description` is available.
+## Validation
 
-Enable schedules only after validating the configured environment.
+The local checks cover the five personal exports, the public adaptation, and the blank workbook. The template has 18 groups of behavioral fixtures for parsing, deduplication, publication dates, Gmail review paths, qualification, and dry-run retention. The personal export check validates 89 nodes without modifying their logic.
+
+The workbook is checked across all twelve monthly tabs, including exact headers, empty data, filters, frozen panes, validations and absence of external hyperlinks. See [Docs/VALIDATION.md](Docs/VALIDATION.md) for the recorded checks.
+
+These are offline checks, not proof of successful n8n import, OAuth connectivity or live provider behavior. No live workflows or spreadsheet cells were changed for these tests. Follow the disposable-environment integration sequence in [Docs/SETUP.md](Docs/SETUP.md) before activation.
 
 ## Known Limitations
 
@@ -1391,6 +1472,18 @@ The factual-review stage reduces unsupported candidate claims but cannot make ge
 The current implementation assumes one active resume at a time.
 
 Multiple role-specific resumes would require an additional routing layer.
+
+### Gmail alert formats
+
+The parser currently supports English alert markers and subject-date formatting. Unsupported localized formats route to review.
+
+### Monthly tabs and annual rollover
+
+Monthly tab names do not identify a year. Configure a publication window or use a separate tracker per year. Retention permanently removes eligible rows from the operational sheet, so preserve history separately when required.
+
+### Concurrent discovery inputs
+
+Historical deduplication does not enforce transactional uniqueness across concurrent saver executions.
 
 ## Future Improvements
 
@@ -1439,6 +1532,9 @@ This project demonstrates:
 - idempotent scheduled workflows;
 - cell-specific persistence;
 - retry-friendly failure behavior;
+- Gmail alert ingestion and review routing;
+- publication-date validation and monthly routing;
+- retention planning and ordered row deletion;
 - OAuth integrations;
 - credential isolation;
 - reusable workflow-template design.
